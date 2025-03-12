@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>小學生除法練習</title>
+  <style>
+    /* 基本樣式與學院風設計 */
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: "Georgia", serif;
+      background-color: #F9F6EE;
+      color: #333;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 2em;
+      color: #2C3E50;
+    }
+    #timer {
+      font-size: 1.2em;
+      margin-top: 10px;
+      color: #E6B800;
+    }
+    /* 題目區 */
+    .question {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+      padding: 10px;
+      border-bottom: 1px solid #ccc;
+    }
+    .question span {
+      flex: 1;
+      font-size: 1.2em;
+    }
+    .question input[type="number"] {
+      width: 60px;
+      font-size: 1.2em;
+      padding: 5px;
+      border: none;
+      border-bottom: 2px solid #ccc;
+      outline: none;
+      text-align: center;
+      transition: background-color 0.3s ease, border-bottom-color 0.3s ease;
+    }
+    .question input[type="number"]:disabled {
+      background-color: #eee;
+    }
+    .question.correct input[type="number"] {
+      background-color: #d4edda;
+      border-bottom-color: #28a745;
+    }
+    .question.wrong input[type="number"] {
+      background-color: #f8d7da;
+      border-bottom-color: #dc3545;
+    }
+    /* 結果與按鈕 */
+    #result {
+      text-align: center;
+      font-size: 1.5em;
+      margin-top: 20px;
+    }
+    #restart {
+      display: none;
+      margin: 20px auto;
+      padding: 10px 20px;
+      font-size: 1.2em;
+      background-color: #E6B800;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #restart:hover {
+      opacity: 0.9;
+    }
+    /* Shake 動畫效果 */
+    @keyframes shake {
+      0% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      50% { transform: translateX(5px); }
+      75% { transform: translateX(-5px); }
+      100% { transform: translateX(0); }
+    }
+    .shake {
+      animation: shake 0.3s;
+    }
+    /* 響應式設計 */
+    @media (max-width: 600px) {
+      .container {
+        padding: 10px;
+      }
+      .question span {
+        font-size: 1.1em;
+      }
+      .question input[type="number"] {
+        width: 50px;
+        font-size: 1em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>小學生除法練習</h1>
+      <div id="timer">時間：0秒</div>
+    </header>
+    <div id="quiz"></div>
+    <div id="result"></div>
+    <button id="restart">重新開始</button>
+  </div>
+
+  <script>
+    // 全域變數
+    let startTime = null;
+    let timerInterval = null;
+    const totalQuestions = 10;
+    let answeredCount = 0;
+    const quizContainer = document.getElementById("quiz");
+    const timerDisplay = document.getElementById("timer");
+    const resultDisplay = document.getElementById("result");
+    const restartBtn = document.getElementById("restart");
+    let questions = [];
+
+    // 產生不重複的隨機題目
+    function generateQuestions() {
+      questions = [];
+      let seen = new Set();
+      while (questions.length < totalQuestions) {
+        // 除數與商數皆介於 2 ~ 9
+        const divisor = Math.floor(Math.random() * 8) + 2;
+        const quotient = Math.floor(Math.random() * 8) + 2;
+        const dividend = divisor * quotient;
+        // 以 "被除數÷除數" 為 key
+        const key = `${dividend}÷${divisor}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        questions.push({ dividend, divisor, quotient });
+      }
+    }
+
+    // 呈現題目
+    function renderQuiz() {
+      quizContainer.innerHTML = "";
+      questions.forEach((q, index) => {
+        const questionDiv = document.createElement("div");
+        questionDiv.className = "question";
+        // 顯示題目：例如 "36 ÷ 6 ="
+        const questionText = document.createElement("span");
+        questionText.textContent = `${q.dividend} ÷ ${q.divisor} =`;
+        // 輸入框：僅允許數字，適用於手機彈出數字鍵盤，且限制一位數輸入
+        const inputField = document.createElement("input");
+        inputField.type = "number";
+        inputField.inputMode = "numeric";
+        inputField.setAttribute("maxlength", "1");
+        inputField.setAttribute("data-index", index);
+        // 監聽 input 事件，自動檢查答案（當有值且長度達到限制時）
+        inputField.addEventListener("input", function() {
+          if (this.disabled) return;
+          if (this.value.length >= 1) {
+            checkAnswer(this);
+          }
+        });
+        questionDiv.appendChild(questionText);
+        questionDiv.appendChild(inputField);
+        quizContainer.appendChild(questionDiv);
+      });
+      // 將焦點移至第一個輸入框
+      const firstInput = quizContainer.querySelector("input");
+      if (firstInput) firstInput.focus();
+    }
+
+    // 更新計時器
+    function updateTimer() {
+      const now = new Date();
+      const seconds = Math.floor((now - startTime) / 1000);
+      timerDisplay.textContent = `時間：${seconds}秒`;
+    }
+
+    // 檢查單一題目的答案
+    function checkAnswer(input) {
+      const index = parseInt(input.getAttribute("data-index"));
+      // 若已鎖定則不作動作
+      if (input.disabled) return;
+      // 第一題作答時啟動計時器
+      if (!startTime) {
+        startTime = new Date();
+        timerInterval = setInterval(updateTimer, 1000);
+      }
+      const userAnswer = parseInt(input.value);
+      const correctAnswer = questions[index].quotient;
+      const questionDiv = input.parentElement;
+      // 禁止更正：輸入後立即鎖定
+      input.disabled = true;
+      answeredCount++;
+
+      if (userAnswer === correctAnswer) {
+        // 答對：變綠色
+        questionDiv.classList.add("correct");
+      } else {
+        // 答錯：變紅色並震動提示
+        questionDiv.classList.add("wrong");
+        questionDiv.classList.add("shake");
+        setTimeout(() => {
+          questionDiv.classList.remove("shake");
+        }, 300);
+      }
+
+      // 若尚未全部作答則自動跳轉至下一題
+      if (answeredCount < totalQuestions) {
+        moveToNextInput();
+      } else {
+        // 第十題答完後，解除焦點並結束測驗
+        document.activeElement.blur();
+        endQuiz();
+      }
+    }
+
+    // 移動焦點至下一個未作答的輸入框
+    function moveToNextInput() {
+      const inputs = quizContainer.querySelectorAll("input");
+      for (let input of inputs) {
+        if (!input.disabled) {
+          input.focus();
+          return;
+        }
+      }
+    }
+
+    // 結束作答，停止計時並顯示結果
+    function endQuiz() {
+      clearInterval(timerInterval);
+      const endTime = new Date();
+      const seconds = Math.floor((endTime - startTime) / 1000);
+      const correctCount = quizContainer.querySelectorAll(".correct").length;
+      resultDisplay.textContent = `完成！你答對了 ${correctCount}/${totalQuestions} 題，用時 ${seconds} 秒。`;
+      restartBtn.style.display = "block";
+    }
+
+    // 重新開始遊戲
+    function resetQuiz() {
+      startTime = null;
+      answeredCount = 0;
+      resultDisplay.textContent = "";
+      restartBtn.style.display = "none";
+      timerDisplay.textContent = "時間：0秒";
+      clearInterval(timerInterval);
+      generateQuestions();
+      renderQuiz();
+    }
+
+    // 監聽重新開始按鈕
+    restartBtn.addEventListener("click", resetQuiz);
+
+    // 新增全域鍵盤監聽，當成績顯示後按下 Enter 即重新開始
+    window.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && restartBtn.style.display === "block") {
+        resetQuiz();
+      }
+    });
+
+    // 頁面載入後初始化
+    window.onload = function() {
+      resetQuiz();
+    }
+  </script>
+</body>
+</html>
