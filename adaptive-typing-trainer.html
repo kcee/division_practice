@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>個人化英打練習</title>
+    <!-- 引入 Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* --- 基本設定與字體 --- */
+        :root {
+            --bg-color: #F5EFE6;
+            --text-color: #3C2A21;
+            --primary-color: #7A5C58;
+            --secondary-color: #E8DFCA;
+            --accent-color: #A87C7C;
+            --correct-color: #2E7D32;
+            --incorrect-color: #C62828;
+            --border-color: #D7C0AE;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --font-family: 'Segoe UI', 'Microsoft JhengHei', 'PingFang TC', sans-serif;
+            --chart-grid-color: rgba(60, 42, 33, 0.1);
+        }
+
+        body.dark-mode {
+            --bg-color: #261C1A;
+            --text-color: #E8DFCA;
+            --primary-color: #A87C7C;
+            --secondary-color: #3C2A21;
+            --accent-color: #7A5C58;
+            --border-color: #5A4642;
+            --chart-grid-color: rgba(232, 223, 202, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            min-height: 100%;
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start; /* 從 center 改為 flex-start，讓內容從頂部開始 */
+            padding: 1rem;
+            padding-top: 5rem; /* 增加頂部間距，避免內容被 header 遮擋 */
+            padding-bottom: 2rem;
+        }
+
+        /* --- 全域元件 --- */
+        header {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            z-index: 100;
+        }
+
+        #user-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background-color: var(--secondary-color);
+            padding: 0.5rem 1rem;
+            border-radius: 99px;
+            box-shadow: 0 2px 5px var(--shadow-color);
+        }
+
+        #logout-btn {
+            background: none;
+            border: none;
+            color: var(--accent-color);
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .theme-switcher {
+            display: flex;
+            align-items: center;
+            background-color: var(--secondary-color);
+            padding: 0.5rem;
+            border-radius: 99px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px var(--shadow-color);
+        }
+
+        .theme-switcher input { display: none; }
+        .theme-switcher .icon { font-size: 1.2rem; }
+
+        /* --- 頁面容器 --- */
+        .page {
+            width: 100%;
+            max-width: 800px; /* 稍微加寬以容納圖表 */
+            padding: 1.5rem;
+            background-color: var(--secondary-color);
+            border-radius: 16px;
+            box-shadow: 0 4px 15px var(--shadow-color);
+            display: none;
+            flex-direction: column;
+            gap: 1.5rem;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        .page.active { display: flex; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* --- 通用元件 --- */
+        h1, h2, legend {
+            text-align: center;
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        fieldset {
+            border: 1px solid var(--border-color);
+            padding: 1.5rem;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        button {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            background-color: var(--primary-color);
+            color: var(--bg-color);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: transform 0.2s, background-color 0.2s;
+        }
+        button:hover { transform: translateY(-2px); background-color: var(--accent-color); }
+        
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        /* --- 設定頁: 字母選擇區塊 --- */
+        #letter-selection {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+        }
+        .selection-row {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+        }
+        .number-selection-row {
+            display: none; /* 預設隱藏 */
+        }
+        #letter-selection-wrapper.numbers-enabled .number-selection-row {
+            display: flex; /* 開啟時顯示 */
+        }
+        .letter-checkbox label {
+            width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;
+            border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer;
+            transition: all 0.2s; font-weight: bold; font-size: 1.2rem;
+            user-select: none;
+        }
+        .letter-checkbox input { display: none; }
+        .letter-checkbox input:checked + label {
+            background-color: var(--accent-color); color: var(--bg-color); border-color: var(--accent-color);
+        }
+        .selection-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+        .selection-actions button {
+            flex-grow: 0;
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            background-color: var(--accent-color);
+        }
+        .settings-option, .data-actions {
+            display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+        }
+        .data-actions button { flex-grow: 1; }
+        #upload-record-input { display: none; }
+
+        /* --- 練習頁 --- */
+        #practice-page { align-items: center; text-align: center; }
+        #char-display-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #char-display {
+            font-size: clamp(6rem, 20vw, 10rem); font-weight: bold; line-height: 1;
+            width: 180px; height: 180px; display: flex; align-items: center; justify-content: center;
+            border-radius: 20px; transition: color 0.3s, background-color 0.3s;
+        }
+        #char-hint { font-size: 1.25rem; color: var(--accent-color); height: 2rem; margin-top: 0.5rem; font-weight: 500; }
+        #char-display.correct { color: var(--correct-color); }
+        #char-display.incorrect { color: var(--incorrect-color); }
+        #progress-info { font-size: 1.5rem; color: var(--primary-color); }
+
+        /* --- 螢幕鍵盤 --- */
+        #keyboard { display: flex; flex-direction: column; gap: 5px; padding: 10px; background-color: var(--bg-color); border-radius: 8px; }
+        .keyboard-row { display: flex; justify-content: center; gap: 5px; }
+        .key {
+            height: 50px; min-width: 50px; display: flex; align-items: center; justify-content: center;
+            background-color: var(--secondary-color); border: 1px solid var(--border-color);
+            border-radius: 5px; font-size: 1.2rem; transition: all 0.1s ease;
+        }
+        .key.highlight { background-color: var(--accent-color); color: var(--bg-color); transform: scale(1.1); box-shadow: 0 0 15px var(--accent-color); }
+        @media (max-width: 600px) {
+            .key { height: 40px; min-width: 28px; font-size: 1rem; }
+            .keyboard-row, #keyboard { gap: 3px; }
+            .letter-checkbox label { width: 32px; height: 32px; font-size: 1rem; }
+            .selection-row { gap: 4px; }
+        }
+
+        /* --- 成績頁 --- */
+        #results-summary p { font-size: 1.2rem; background-color: var(--bg-color); padding: 1rem; border-radius: 8px; }
+        #results-summary p span { font-weight: bold; color: var(--primary-color); }
+        #error-analysis-list { list-style-type: none; padding-left: 0; }
+        #error-analysis-list li { background-color: var(--bg-color); padding: 0.5rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; }
+        
+        /* --- 統計圖表 --- */
+        .chart-wrapper {
+            position: relative;
+            height: 350px;
+            width: 100%;
+        }
+        .chart-sort-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .chart-sort-actions span {
+            font-size: 0.9rem;
+            color: var(--primary-color);
+            margin-right: 0.5rem;
+        }
+        .sort-btn {
+            padding: 0.25rem 0.75rem;
+            font-size: 0.8rem;
+            background-color: var(--bg-color);
+            color: var(--primary-color);
+            border: 1px solid var(--border-color);
+        }
+        .sort-btn.active,
+        .sort-btn:hover {
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            border-color: var(--accent-color);
+            transform: none;
+        }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <div id="user-info" style="display: none;">
+            <span id="current-user-span"></span>
+            <button id="logout-btn">登出</button>
+        </div>
+        <div class="theme-switcher">
+            <label for="theme-toggle"><span class="icon">☀️</span></label>
+            <input type="checkbox" id="theme-toggle">
+        </div>
+    </header>
+
+    <div id="login-page" class="page active">
+        <h1>個人化英打練習</h1>
+        <fieldset>
+            <legend>選擇現有使用者</legend>
+            <select id="user-selector"></select>
+            <button id="login-btn">登入</button>
+        </fieldset>
+        <fieldset>
+            <legend>或建立新使用者</legend>
+            <input type="text" id="new-user-input" placeholder="輸入您的名稱 (中英數字)" maxlength="20">
+            <button id="create-user-btn">建立並登入</button>
+        </fieldset>
+    </div>
+
+    <div id="settings-page" class="page">
+        <h2>練習設定</h2>
+        <fieldset id="letter-selection-wrapper">
+            <legend>選擇練習字元</legend>
+            <div id="letter-selection"></div>
+            <div class="selection-actions">
+                <button id="select-all-btn">全選</button>
+                <button id="deselect-all-btn">全部取消</button>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>練習選項</legend>
+            <div class="settings-option">
+                <label for="mixed-case-checkbox">混合大小寫</label>
+                <input type="checkbox" id="mixed-case-checkbox">
+            </div>
+            <div class="settings-option">
+                <label for="include-numbers-checkbox">包含數字與符號</label>
+                <input type="checkbox" id="include-numbers-checkbox">
+            </div>
+            <div class="settings-option">
+                <label for="char-count-input">每輪字數:</label>
+                <input type="number" id="char-count-input" value="50" min="10" max="200" step="10">
+            </div>
+        </fieldset>
+        <button id="start-btn">開始練習</button>
+        <fieldset id="settings-overview-fieldset">
+            <legend>個人學習總覽</legend>
+            <div class="chart-sort-actions">
+                <span>排序方式:</span>
+                <button class="sort-btn" data-sort="alpha" data-target="settings-chart">字母</button>
+                <button class="sort-btn" data-sort="accuracy" data-target="settings-chart">正確率</button>
+                <button class="sort-btn" data-sort="count" data-target="settings-chart">練習次數</button>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="settings-chart"></canvas>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>資料管理</legend>
+            <div class="data-actions">
+                <button id="download-record-btn">下載紀錄</button>
+                <button id="upload-record-btn">上傳紀錄</button>
+                <input type="file" id="upload-record-input" accept=".json">
+            </div>
+        </fieldset>
+    </div>
+
+    <div id="practice-page" class="page">
+        <div id="char-display-wrapper">
+            <div id="char-display"></div>
+            <div id="char-hint"></div>
+        </div>
+        <div id="progress-info"></div>
+        <div id="keyboard"></div>
+    </div>
+
+    <div id="results-page" class="page">
+        <h2>練習成果</h2>
+        <div id="results-summary">
+            <p>練習字元: <span id="result-chars"></span></p>
+            <p>花費時間: <span id="result-time"></span> 秒</p>
+            <p>正確率: <span id="result-accuracy"></span>%</p>
+        </div>
+        <fieldset>
+            <legend>本次錯誤分析</legend>
+            <ul id="error-analysis-list"></ul>
+        </fieldset>
+        <fieldset>
+            <legend>個人學習總覽</legend>
+            <div class="chart-sort-actions">
+                <span>排序方式:</span>
+                <button class="sort-btn" data-sort="alpha" data-target="results-chart">字母</button>
+                <button class="sort-btn" data-sort="accuracy" data-target="results-chart">正確率</button>
+                <button class="sort-btn" data-sort="count" data-target="results-chart">練習次數</button>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="results-chart"></canvas>
+            </div>
+        </fieldset>
+        <button id="back-to-home-btn">回到設定</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+
+            // --- DOM 元素 ---
+            const dom = {
+                pages: document.querySelectorAll('.page'),
+                loginPage: document.getElementById('login-page'),
+                settingsPage: document.getElementById('settings-page'),
+                practicePage: document.getElementById('practice-page'),
+                resultsPage: document.getElementById('results-page'),
+                userSelector: document.getElementById('user-selector'),
+                loginBtn: document.getElementById('login-btn'),
+                newUserInp: document.getElementById('new-user-input'),
+                createUserBtn: document.getElementById('create-user-btn'),
+                userInfo: document.getElementById('user-info'),
+                currentUserSpan: document.getElementById('current-user-span'),
+                logoutBtn: document.getElementById('logout-btn'),
+                letterSelectionWrapper: document.getElementById('letter-selection-wrapper'),
+                letterSelection: document.getElementById('letter-selection'),
+                selectAllBtn: document.getElementById('select-all-btn'),
+                deselectAllBtn: document.getElementById('deselect-all-btn'),
+                mixedCaseCheck: document.getElementById('mixed-case-checkbox'),
+                includeNumbersCheck: document.getElementById('include-numbers-checkbox'),
+                charCountInp: document.getElementById('char-count-input'),
+                startBtn: document.getElementById('start-btn'),
+                downloadBtn: document.getElementById('download-record-btn'),
+                uploadBtn: document.getElementById('upload-record-btn'),
+                uploadInput: document.getElementById('upload-record-input'),
+                charDisplay: document.getElementById('char-display'),
+                charHint: document.getElementById('char-hint'),
+                progressInfo: document.getElementById('progress-info'),
+                keyboard: document.getElementById('keyboard'),
+                resultChars: document.getElementById('result-chars'),
+                resultTime: document.getElementById('result-time'),
+                resultAccuracy: document.getElementById('result-accuracy'),
+                errorAnalysisList: document.getElementById('error-analysis-list'),
+                settingsChartCanvas: document.getElementById('settings-chart'),
+                resultsChartCanvas: document.getElementById('results-chart'),
+                backToHomeBtn: document.getElementById('back-to-home-btn'),
+                themeToggle: document.getElementById('theme-toggle'),
+                themeIcon: document.querySelector('.theme-switcher .icon'),
+            };
+
+            // --- 應用程式狀態 ---
+            const state = {
+                currentUser: null,
+                allUsersData: {},
+                practiceSet: [],
+                currentIndex: 0,
+                correctCount: 0,
+                startTime: null,
+                sessionErrors: {},
+                settingsChartInstance: null,
+                resultsChartInstance: null,
+                currentSortOrder: 'alpha' // 預設排序方式
+            };
+
+            const STORAGE_KEY = 'typingAppAllUsers_v3';
+            let audioCtx;
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                console.warn('Web Audio API is not supported in this browser.');
+            }
+
+            // --- 函式 ---
+
+            function playSound(type) {
+                if (!audioCtx) return;
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 0.01);
+                if (type === 'success') {
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+                } else {
+                    oscillator.type = 'square';
+                    oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+                }
+                gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.1);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.1);
+            }
+
+            function showPage(pageId) {
+                dom.pages.forEach(page => page.classList.toggle('active', page.id === pageId));
+            }
+
+            function loadAllUsersData() {
+                const data = localStorage.getItem(STORAGE_KEY);
+                state.allUsersData = data ? JSON.parse(data) : {};
+            }
+
+            function saveAllUsersData() {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state.allUsersData));
+            }
+
+            function populateUserSelector() {
+                dom.userSelector.innerHTML = '';
+                const usernames = Object.keys(state.allUsersData);
+                if (usernames.length === 0) {
+                    const option = new Option('尚無使用者', '', true, true);
+                    option.disabled = true;
+                    dom.userSelector.add(option);
+                    dom.loginBtn.disabled = true;
+                } else {
+                    usernames.forEach(username => dom.userSelector.add(new Option(username, username)));
+                    dom.loginBtn.disabled = false;
+                }
+            }
+
+            function login(username) {
+                if (!username || !state.allUsersData[username]) {
+                    alert('使用者不存在！');
+                    return;
+                }
+                state.currentUser = username;
+                dom.currentUserSpan.textContent = username;
+                dom.userInfo.style.display = 'flex';
+                loadUserSettings();
+                displayStatsChart('settings-chart');
+                updateSortButtonsState(dom.settingsPage);
+                showPage('settings-page');
+            }
+
+            function logout() {
+                if (state.settingsChartInstance) {
+                    state.settingsChartInstance.destroy();
+                    state.settingsChartInstance = null;
+                }
+                if (state.resultsChartInstance) {
+                    state.resultsChartInstance.destroy();
+                    state.resultsChartInstance = null;
+                }
+                state.currentUser = null;
+                dom.userInfo.style.display = 'none';
+                showPage('login-page');
+            }
+            
+            function loadUserSettings() {
+                const settings = state.allUsersData[state.currentUser]?.settings;
+                if (!settings) return;
+
+                // Load letter selections
+                dom.letterSelection.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                    cb.checked = settings.selectedChars.includes(cb.value);
+                });
+
+                // Load other settings
+                dom.mixedCaseCheck.checked = settings.mixedCase;
+                dom.includeNumbersCheck.checked = settings.includeNumbers;
+                dom.charCountInp.value = settings.charCount;
+                
+                // Update UI based on includeNumbers setting
+                dom.letterSelectionWrapper.classList.toggle('numbers-enabled', settings.includeNumbers);
+            }
+
+            function saveUserSettings() {
+                if (!state.currentUser) return;
+                const selectedChars = Array.from(dom.letterSelection.querySelectorAll('input:checked')).map(cb => cb.value);
+                state.allUsersData[state.currentUser].settings = {
+                    selectedChars: selectedChars.length > 0 ? selectedChars : ['a', 's', 'd', 'f'],
+                    mixedCase: dom.mixedCaseCheck.checked,
+                    includeNumbers: dom.includeNumbersCheck.checked,
+                    charCount: parseInt(dom.charCountInp.value, 10)
+                };
+                saveAllUsersData();
+            }
+
+            function generatePracticeSet() {
+                const user = state.allUsersData[state.currentUser];
+                if (!user) return false;
+                const { settings, stats } = user;
+                
+                let baseChars = settings.selectedChars;
+                if (baseChars.length === 0) {
+                    alert('請至少選擇一個要練習的字元！');
+                    return false;
+                }
+
+                const practicedChars = Object.keys(stats);
+                const totalPresented = practicedChars.reduce((sum, char) => sum + (stats[char].presented || 0), 0);
+                const avgPresented = practicedChars.length > 0 ? totalPresented / practicedChars.length : 0;
+
+                const weightedPool = [];
+                const BASE_WEIGHT = 5;
+                const SCARCITY_MULTIPLIER = 10;
+                const RECENT_ERROR_MULTIPLIER = 3;
+
+                baseChars.forEach(char => {
+                    const charStat = stats[char] || { presented: 0, correct: 0, recentErrors: 0 };
+                    let scarcityWeight = 0;
+                    if (charStat.presented < avgPresented) {
+                        scarcityWeight = Math.round((1 - (charStat.presented / (avgPresented + 1))) * SCARCITY_MULTIPLIER);
+                    }
+                    const recentErrorWeight = (charStat.recentErrors || 0) * RECENT_ERROR_MULTIPLIER;
+                    const totalWeight = BASE_WEIGHT + scarcityWeight + recentErrorWeight;
+                    for (let i = 0; i < totalWeight; i++) {
+                        weightedPool.push(char);
+                    }
+                });
+
+                state.practiceSet = [];
+                const canApplyNoRepeatRule = new Set(baseChars).size >= 3;
+
+                for (let i = 0; i < settings.charCount; i++) {
+                    let randomChar;
+                    const lastChar = i > 0 ? state.practiceSet[i - 1].toLowerCase() : null;
+                    const secondLastChar = i > 1 ? state.practiceSet[i - 2].toLowerCase() : null;
+
+                    if (canApplyNoRepeatRule && weightedPool.length > 2) {
+                        do {
+                            randomChar = weightedPool[Math.floor(Math.random() * weightedPool.length)];
+                        } while (randomChar === lastChar || randomChar === secondLastChar);
+                    } else {
+                        randomChar = weightedPool[Math.floor(Math.random() * weightedPool.length)];
+                    }
+                    
+                    if (settings.mixedCase && Math.random() > 0.5 && !'1234567890-='.includes(randomChar)) {
+                        state.practiceSet.push(randomChar.toUpperCase());
+                    } else {
+                        state.practiceSet.push(randomChar);
+                    }
+                }
+                return true;
+            }
+
+            function startPractice() {
+                saveUserSettings();
+                if (!generatePracticeSet()) return;
+                
+                const practiceIncludesNumbers = state.practiceSet.some(char => '1234567890-='.includes(char));
+                createPracticeKeyboard(practiceIncludesNumbers);
+
+                state.currentIndex = 0;
+                state.correctCount = 0;
+                state.startTime = new Date();
+                state.sessionErrors = {};
+
+                showPage('practice-page');
+                displayNextChar();
+                window.addEventListener('keydown', handleKeyPress);
+            }
+            
+            function displayNextChar() {
+                if (state.currentIndex >= state.practiceSet.length) {
+                    showResults();
+                    return;
+                }
+                const char = state.practiceSet[state.currentIndex];
+                dom.charDisplay.textContent = char;
+                dom.charDisplay.className = '';
+                dom.progressInfo.textContent = `${state.currentIndex + 1} / ${state.practiceSet.length}`;
+                if (char === 'I') dom.charHint.textContent = '大寫 I';
+                else if (char === 'l') dom.charHint.textContent = '小寫 l';
+                else dom.charHint.textContent = '';
+                highlightKey(char);
+            }
+
+            function handleKeyPress(e) {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+                if (e.key.length > 1) return;
+                e.preventDefault();
+                window.removeEventListener('keydown', handleKeyPress); 
+                const typedChar = e.key;
+                const targetChar = state.practiceSet[state.currentIndex];
+                const isCorrect = typedChar === targetChar;
+                updateStats(targetChar.toLowerCase(), isCorrect);
+                if (isCorrect) {
+                    dom.charDisplay.classList.add('correct');
+                    playSound('success');
+                    state.correctCount++;
+                } else {
+                    dom.charDisplay.classList.add('incorrect');
+                    playSound('fail');
+                    const baseChar = targetChar.toLowerCase();
+                    state.sessionErrors[baseChar] = (state.sessionErrors[baseChar] || 0) + 1;
+                }
+                const delay = isCorrect ? 300 : 1000;
+                setTimeout(() => {
+                    state.currentIndex++;
+                    displayNextChar();
+                    if (state.currentIndex < state.practiceSet.length) {
+                       window.addEventListener('keydown', handleKeyPress);
+                    }
+                }, delay);
+            }
+            
+            function updateStats(char, isCorrect) {
+                if (!state.currentUser) return;
+                const stats = state.allUsersData[state.currentUser].stats;
+                if (!stats[char]) {
+                    stats[char] = { presented: 0, correct: 0, recentErrors: 0 };
+                }
+                stats[char].presented++;
+                if (isCorrect) {
+                    stats[char].correct++;
+                    stats[char].recentErrors = Math.max(0, stats[char].recentErrors - 1);
+                } else {
+                    stats[char].recentErrors = (stats[char].recentErrors || 0) + 5;
+                }
+                saveAllUsersData();
+            }
+
+            function showResults() {
+                window.removeEventListener('keydown', handleKeyPress);
+                highlightKey(null);
+                const endTime = new Date();
+                const timeTaken = ((endTime - state.startTime) / 1000).toFixed(2);
+                const accuracy = state.practiceSet.length > 0 ? ((state.correctCount / state.practiceSet.length) * 100).toFixed(1) : 0;
+                const userSettings = state.allUsersData[state.currentUser]?.settings;
+                dom.resultChars.textContent = userSettings ? userSettings.selectedChars.join(', ') : 'N/A';
+                dom.resultTime.textContent = timeTaken;
+                dom.resultAccuracy.textContent = accuracy;
+                dom.errorAnalysisList.innerHTML = '';
+                const sortedErrors = Object.entries(state.sessionErrors).sort((a, b) => b[1] - a[1]);
+                if (sortedErrors.length === 0) {
+                    dom.errorAnalysisList.innerHTML = '<li>太棒了！本次沒有任何錯誤。</li>';
+                } else {
+                    sortedErrors.forEach(([char, count]) => {
+                        const li = document.createElement('li');
+                        li.textContent = `字元 '${char}' 錯誤了 ${count} 次`;
+                        dom.errorAnalysisList.appendChild(li);
+                    });
+                }
+                displayStatsChart('results-chart');
+                updateSortButtonsState(dom.resultsPage);
+                showPage('results-page');
+            }
+
+            function displayStatsChart(canvasId) {
+                const isDarkMode = document.body.classList.contains('dark-mode');
+                const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color');
+                const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--chart-grid-color');
+
+                const canvas = document.getElementById(canvasId);
+                const ctx = canvas.getContext('2d');
+                let chartInstance = canvasId === 'settings-chart' ? state.settingsChartInstance : state.resultsChartInstance;
+
+                if (chartInstance) {
+                    chartInstance.destroy();
+                }
+
+                const stats = state.allUsersData[state.currentUser]?.stats || {};
+                const statsArray = Object.entries(stats)
+                    .filter(([, data]) => data.presented > 0)
+                    .map(([char, data]) => ({
+                        char,
+                        ...data,
+                        accuracy: data.presented > 0 ? (data.correct / data.presented) * 100 : 0
+                    }));
+                
+                switch (state.currentSortOrder) {
+                    case 'count':
+                        statsArray.sort((a, b) => b.presented - a.presented);
+                        break;
+                    case 'accuracy':
+                        statsArray.sort((a, b) => a.accuracy - b.accuracy);
+                        break;
+                    case 'alpha':
+                    default:
+                        statsArray.sort((a, b) => a.char.localeCompare(b.char));
+                        break;
+                }
+
+                if (statsArray.length === 0) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = textColor;
+                    ctx.font = "16px var(--font-family)";
+                    ctx.textAlign = 'center';
+                    ctx.fillText('尚無足夠的統計資料可供顯示。', canvas.width / 2, canvas.height / 2);
+                    return;
+                }
+                
+                chartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: statsArray.map(s => s.char.toUpperCase()),
+                        datasets: [
+                            {
+                                label: '練習次數',
+                                data: statsArray.map(s => s.presented),
+                                backgroundColor: 'rgba(122, 92, 88, 0.6)',
+                                borderColor: 'rgba(122, 92, 88, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y',
+                            },
+                            {
+                                label: '正確率 (%)',
+                                data: statsArray.map(s => s.accuracy.toFixed(1)),
+                                backgroundColor: 'rgba(46, 125, 50, 0.6)',
+                                borderColor: 'rgba(46, 125, 50, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y1',
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { labels: { color: textColor } },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) label += ': ';
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y;
+                                            if (context.dataset.label.includes('%')) label += '%';
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { ticks: { color: textColor }, grid: { color: gridColor } },
+                            y: {
+                                type: 'linear', display: true, position: 'left',
+                                title: { display: true, text: '練習次數', color: textColor },
+                                ticks: { color: textColor, stepSize: 10 },
+                                grid: { color: gridColor },
+                                beginAtZero: true
+                            },
+                            y1: {
+                                type: 'linear', display: true, position: 'right', max: 100, min: 0,
+                                title: { display: true, text: '正確率 (%)', color: textColor },
+                                ticks: { color: textColor, callback: value => value + '%' },
+                                grid: { drawOnChartArea: false }
+                            }
+                        }
+                    }
+                });
+
+                if (canvasId === 'settings-chart') state.settingsChartInstance = chartInstance;
+                else state.resultsChartInstance = chartInstance;
+            }
+
+            function createSelectionKeyboard() {
+                const numberLayout = "1234567890-="; // [修正]
+                const letterLayout = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+                dom.letterSelection.innerHTML = '';
+
+                const createRow = (chars) => {
+                    const rowDiv = document.createElement('div');
+                    rowDiv.className = 'selection-row';
+                    if (numberLayout.includes(chars[0])) {
+                        rowDiv.classList.add('number-selection-row');
+                    }
+                    chars.split('').forEach(char => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'letter-checkbox';
+                        wrapper.innerHTML = `
+                            <input type="checkbox" id="char-select-${char}" value="${char}">
+                            <label for="char-select-${char}">${char.toUpperCase()}</label>
+                        `;
+                        rowDiv.appendChild(wrapper);
+                    });
+                    dom.letterSelection.appendChild(rowDiv);
+                };
+                
+                createRow(numberLayout);
+                letterLayout.forEach(rowStr => createRow(rowStr));
+            }
+            
+            function createPracticeKeyboard(includeNumbers) {
+                const numberLayout = "1234567890-="; // [修正]
+                const letterLayout = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+                dom.keyboard.innerHTML = '';
+                
+                const createRow = (chars) => {
+                    const rowDiv = document.createElement('div');
+                    rowDiv.className = 'keyboard-row';
+                    chars.split('').forEach(char => {
+                        const keyDiv = document.createElement('div');
+                        keyDiv.className = 'key';
+                        keyDiv.textContent = char;
+                        keyDiv.dataset.key = char;
+                        rowDiv.appendChild(keyDiv);
+                    });
+                    dom.keyboard.appendChild(rowDiv);
+                };
+                
+                if (includeNumbers) createRow(numberLayout);
+                letterLayout.forEach(rowStr => createRow(rowStr));
+            }
+
+            function highlightKey(char) {
+                dom.keyboard.querySelectorAll('.key').forEach(key => {
+                    key.classList.toggle('highlight', key.dataset.key === char?.toLowerCase());
+                });
+            }
+            
+            function handleDownload() {
+                if (!state.currentUser) return;
+                const userData = state.allUsersData[state.currentUser];
+                const dataStr = JSON.stringify(userData, null, 2);
+                const blob = new Blob([dataStr], {type: "application/json"});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${state.currentUser}_typing_record.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+
+            function handleUpload(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const importedData = JSON.parse(e.target.result);
+                        if (importedData && importedData.settings && importedData.stats) {
+                            state.allUsersData[state.currentUser] = importedData;
+                            saveAllUsersData();
+                            loadUserSettings();
+                            displayStatsChart('settings-chart');
+                            alert(`使用者 ${state.currentUser} 的紀錄已成功匯入！`);
+                        } else {
+                            alert('檔案格式不符，匯入失敗！');
+                        }
+                    } catch (error) {
+                        alert('讀取檔案失敗，請確認檔案為正確的JSON格式。');
+                        console.error("Upload error:", error);
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            }
+            
+            function updateSortButtonsState(pageElement) {
+                pageElement.querySelectorAll('.sort-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.sort === state.currentSortOrder);
+                });
+            }
+
+            function init() {
+                createSelectionKeyboard();
+                
+                loadAllUsersData();
+                populateUserSelector();
+                showPage('login-page');
+
+                document.body.addEventListener('click', (e) => {
+                    if (e.target.matches('.sort-btn')) {
+                        const sortType = e.target.dataset.sort;
+                        const targetCanvasId = e.target.dataset.target;
+                        state.currentSortOrder = sortType;
+                        updateSortButtonsState(e.target.closest('.page'));
+                        displayStatsChart(targetCanvasId);
+                    }
+                });
+
+                dom.loginBtn.addEventListener('click', () => login(dom.userSelector.value));
+                dom.createUserBtn.addEventListener('click', () => {
+                    const newUsername = dom.newUserInp.value.trim();
+                    if (!newUsername) {
+                        alert('請輸入有效的使用者名稱！');
+                        return;
+                    }
+                    if (state.allUsersData[newUsername]) {
+                        alert('此使用者名稱已被使用！');
+                        return;
+                    }
+                    state.allUsersData[newUsername] = {
+                        settings: {
+                            selectedChars: ['a', 's', 'd', 'f', 'j', 'k', 'l'],
+                            mixedCase: false,
+                            includeNumbers: false,
+                            charCount: 50
+                        },
+                        stats: {}
+                    };
+                    saveAllUsersData();
+                    populateUserSelector();
+                    dom.userSelector.value = newUsername;
+                    login(newUsername);
+                    dom.newUserInp.value = '';
+                });
+                
+                dom.logoutBtn.addEventListener('click', logout);
+                dom.startBtn.addEventListener('click', startPractice);
+                dom.backToHomeBtn.addEventListener('click', () => {
+                    displayStatsChart('settings-chart');
+                    updateSortButtonsState(dom.settingsPage);
+                    showPage('settings-page');
+                });
+                
+                dom.selectAllBtn.addEventListener('click', () => {
+                    dom.letterSelection.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+                });
+
+                dom.deselectAllBtn.addEventListener('click', () => {
+                    dom.letterSelection.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                });
+
+                dom.includeNumbersCheck.addEventListener('change', (e) => {
+                    dom.letterSelectionWrapper.classList.toggle('numbers-enabled', e.target.checked);
+                    if (!e.target.checked) {
+                        // Uncheck all number/symbol keys if the option is disabled
+                        dom.letterSelection.querySelectorAll('.number-selection-row input').forEach(cb => cb.checked = false);
+                    }
+                });
+
+                dom.downloadBtn.addEventListener('click', handleDownload);
+                dom.uploadBtn.addEventListener('click', () => dom.uploadInput.click());
+                dom.uploadInput.addEventListener('change', handleUpload);
+
+                dom.themeToggle.addEventListener('change', (e) => {
+                    document.body.classList.toggle('dark-mode', e.target.checked);
+                    dom.themeIcon.textContent = e.target.checked ? '🌙' : '☀️';
+                    if(state.currentUser) {
+                        if (dom.settingsPage.classList.contains('active')) {
+                            displayStatsChart('settings-chart');
+                        }
+                        if (dom.resultsPage.classList.contains('active')) {
+                            displayStatsChart('results-chart');
+                        }
+                    }
+                });
+
+                const savedTheme = localStorage.getItem('typingTheme');
+                if (savedTheme === 'dark') {
+                    dom.themeToggle.checked = true;
+                    document.body.classList.add('dark-mode');
+                    dom.themeIcon.textContent = '🌙';
+                }
+            }
+
+            init();
+        });
+    </script>
+</body>
+</html>
