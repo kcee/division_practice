@@ -16,6 +16,7 @@
             --accent-color: #A87C7C;
             --correct-color: #2E7D32;
             --incorrect-color: #C62828;
+            --probability-color: #6a1b9a; /* 新增機率顏色 */
             --border-color: #D7C0AE;
             --shadow-color: rgba(0, 0, 0, 0.1);
             --font-family: 'Segoe UI', 'Microsoft JhengHei', 'PingFang TC', sans-serif;
@@ -28,6 +29,7 @@
             --primary-color: #A87C7C;
             --secondary-color: #3C2A21;
             --accent-color: #7A5C58;
+            --probability-color: #ab47bc;
             --border-color: #5A4642;
             --chart-grid-color: rgba(232, 223, 202, 0.15);
         }
@@ -457,19 +459,20 @@
             const state = {
                 currentUser: null,
                 allUsersData: {},
-                practiceSet: [],
-                currentIndex: 0,
-                correctCount: 0,
-                startTime: null,
-                sessionErrors: {},
-                settingsChartInstance: null,
-                resultsChartInstance: null,
-                currentSortOrder: 'alpha',
-                isAwaitingCorrection: false,
-                isTransitioning: false,
+                practiceRound: {
+                    targetChar: null,
+                    currentIndex: 0,
+                    totalCount: 0,
+                    correctOnFirstTry: 0,
+                    startTime: null,
+                    sessionErrors: {},
+                    lastTwoChars: [],
+                    isAwaitingCorrection: false,
+                    isTransitioning: false,
+                }
             };
 
-            const APP_VERSION = 'v2025.07.15.1';
+            const APP_VERSION = 'v2025.07.15.3';
             const STORAGE_KEY = 'typingAppAllUsers_v3';
             let audioCtx;
             try {
@@ -533,6 +536,7 @@
                     return;
                 }
                 state.currentUser = username;
+                state.currentSortOrder = state.allUsersData[username].settings?.sortOrder || 'alpha';
                 dom.currentUserSpan.textContent = username;
                 dom.userInfo.style.display = 'flex';
                 loadUserSettings();
@@ -542,14 +546,8 @@
             }
 
             function logout() {
-                if (state.settingsChartInstance) {
-                    state.settingsChartInstance.destroy();
-                    state.settingsChartInstance = null;
-                }
-                if (state.resultsChartInstance) {
-                    state.resultsChartInstance.destroy();
-                    state.resultsChartInstance = null;
-                }
+                if (state.settingsChartInstance) state.settingsChartInstance.destroy();
+                if (state.resultsChartInstance) state.resultsChartInstance.destroy();
                 state.currentUser = null;
                 dom.userInfo.style.display = 'none';
                 showPage('login-page');
@@ -577,27 +575,28 @@
                     selectedChars: selectedChars.length > 0 ? selectedChars : ['a', 's', 'd', 'f'],
                     mixedCase: dom.mixedCaseCheck.checked,
                     includeNumbers: dom.includeNumbersCheck.checked,
-                    charCount: parseInt(dom.charCountInp.value, 10)
+                    charCount: parseInt(dom.charCountInp.value, 10),
+                    sortOrder: state.currentSortOrder
                 };
                 saveAllUsersData();
             }
 
-            function generatePracticeSet() {
+            function getCharProbabilities() {
                 const user = state.allUsersData[state.currentUser];
-                if (!user) return false;
+                if (!user) return { pool: [], probabilities: {} };
                 const { settings, stats } = user;
                 
                 let baseChars = settings.selectedChars;
-                if (baseChars.length === 0) {
-                    alert('請至少選擇一個要練習的字元！');
-                    return false;
-                }
+                if (baseChars.length === 0) return { pool: [], probabilities: {} };
 
                 const practicedChars = Object.keys(stats);
                 const totalPresented = practicedChars.reduce((sum, char) => sum + (stats[char].presented || 0), 0);
                 const avgPresented = practicedChars.length > 0 ? totalPresented / practicedChars.length : 0;
 
                 const weightedPool = [];
+                const weights = {};
+                let totalWeight = 0;
+
                 const BASE_WEIGHT = 5;
                 const SCARCITY_MULTIPLIER = 10;
                 const RECENT_ERROR_MULTIPLIER = 3;
@@ -609,50 +608,68 @@
                         scarcityWeight = Math.round((1 - (charStat.presented / (avgPresented + 1))) * SCARCITY_MULTIPLIER);
                     }
                     const recentErrorWeight = (charStat.recentErrors || 0) * RECENT_ERROR_MULTIPLIER;
-                    const totalWeight = BASE_WEIGHT + scarcityWeight + recentErrorWeight;
-                    for (let i = 0; i < totalWeight; i++) {
+                    const weight = BASE_WEIGHT + scarcityWeight + recentErrorWeight;
+                    
+                    weights[char] = weight;
+                    totalWeight += weight;
+
+                    for (let i = 0; i < weight; i++) {
                         weightedPool.push(char);
                     }
                 });
 
-                state.practiceSet = [];
-                const canApplyNoRepeatRule = new Set(baseChars).size >= 3;
-
-                for (let i = 0; i < settings.charCount; i++) {
-                    let randomChar;
-                    const lastChar = i > 0 ? state.practiceSet[i - 1].toLowerCase() : null;
-                    const secondLastChar = i > 1 ? state.practiceSet[i - 2].toLowerCase() : null;
-
-                    if (canApplyNoRepeatRule && weightedPool.length > 2) {
-                        do {
-                            randomChar = weightedPool[Math.floor(Math.random() * weightedPool.length)];
-                        } while (randomChar === lastChar || randomChar === secondLastChar);
-                    } else {
-                        randomChar = weightedPool[Math.floor(Math.random() * weightedPool.length)];
-                    }
-                    
-                    if (settings.mixedCase && Math.random() > 0.5 && !'1234567890-='.includes(randomChar)) {
-                        state.practiceSet.push(randomChar.toUpperCase());
-                    } else {
-                        state.practiceSet.push(randomChar);
+                const probabilities = {};
+                if (totalWeight > 0) {
+                    for (const char in weights) {
+                        probabilities[char] = weights[char] / totalWeight;
                     }
                 }
-                return true;
+                
+                return { pool: weightedPool, probabilities };
+            }
+
+            function generateNextChar() {
+                const { pool } = getCharProbabilities();
+                const settings = state.allUsersData[state.currentUser].settings;
+                
+                if (pool.length === 0) {
+                    const baseChars = settings.selectedChars;
+                    return baseChars.length > 0 ? baseChars[Math.floor(Math.random() * baseChars.length)] : null;
+                }
+
+                let randomChar;
+                const canApplyNoRepeatRule = new Set(settings.selectedChars).size >= 3;
+
+                if (canApplyNoRepeatRule) {
+                    do {
+                        randomChar = pool[Math.floor(Math.random() * pool.length)];
+                    } while (state.practiceRound.lastTwoChars.includes(randomChar));
+                } else {
+                    randomChar = pool[Math.floor(Math.random() * pool.length)];
+                }
+                
+                if (settings.mixedCase && Math.random() > 0.5 && !'1234567890-='.includes(randomChar)) {
+                    return randomChar.toUpperCase();
+                }
+                return randomChar;
             }
 
             function startPractice() {
                 saveUserSettings();
-                if (!generatePracticeSet()) return;
+                const settings = state.allUsersData[state.currentUser].settings;
+                if (settings.selectedChars.length === 0) {
+                    alert('請至少選擇一個要練習的字元！');
+                    return;
+                }
                 
-                const practiceIncludesNumbers = state.practiceSet.some(char => '1234567890-='.includes(char));
+                const practiceIncludesNumbers = settings.selectedChars.some(char => '1234567890-='.includes(char));
                 createPracticeKeyboard(practiceIncludesNumbers);
 
-                state.currentIndex = 0;
-                state.correctCount = 0;
-                state.startTime = new Date();
-                state.sessionErrors = {};
-                state.isAwaitingCorrection = false;
-                state.isTransitioning = false;
+                state.practiceRound = {
+                    targetChar: null, currentIndex: 0, totalCount: settings.charCount,
+                    correctOnFirstTry: 0, startTime: new Date(), sessionErrors: {},
+                    lastTwoChars: [], isAwaitingCorrection: false, isTransitioning: false,
+                };
 
                 showPage('practice-page');
                 displayNextChar();
@@ -660,20 +677,27 @@
             }
             
             function displayNextChar() {
-                if (state.currentIndex >= state.practiceSet.length) {
+                if (state.practiceRound.currentIndex >= state.practiceRound.totalCount) {
                     showResults();
                     return;
                 }
                 
-                state.isAwaitingCorrection = false;
-                const char = state.practiceSet[state.currentIndex];
-                dom.charDisplay.textContent = char;
+                state.practiceRound.isAwaitingCorrection = false;
+                const newChar = generateNextChar();
+                state.practiceRound.targetChar = newChar;
+                
+                state.practiceRound.lastTwoChars.push(newChar.toLowerCase());
+                if (state.practiceRound.lastTwoChars.length > 2) {
+                    state.practiceRound.lastTwoChars.shift();
+                }
+
+                dom.charDisplay.textContent = newChar;
                 dom.charDisplay.className = '';
-                dom.progressInfo.textContent = `${state.currentIndex + 1} / ${state.practiceSet.length}`;
-                if (char === 'I') dom.charHint.textContent = '大寫 I';
-                else if (char === 'l') dom.charHint.textContent = '小寫 l';
+                dom.progressInfo.textContent = `${state.practiceRound.currentIndex + 1} / ${state.practiceRound.totalCount}`;
+                if (newChar === 'I') dom.charHint.textContent = '大寫 I';
+                else if (newChar === 'l') dom.charHint.textContent = '小寫 l';
                 else dom.charHint.textContent = '';
-                highlightKey(char);
+                highlightKey(newChar);
             }
 
             function handleKeyPress(e) {
@@ -681,24 +705,24 @@
                 if (e.key.length > 1) return;
                 e.preventDefault();
                 
-                if (state.isTransitioning) return;
+                if (state.practiceRound.isTransitioning) return;
 
                 const typedChar = e.key;
-                const targetChar = state.practiceSet[state.currentIndex];
+                const targetChar = state.practiceRound.targetChar;
 
-                if (state.isAwaitingCorrection) {
+                if (state.practiceRound.isAwaitingCorrection) {
                     if (typedChar === targetChar) {
-                        state.isAwaitingCorrection = false;
-                        state.isTransitioning = true;
+                        state.practiceRound.isAwaitingCorrection = false;
+                        state.practiceRound.isTransitioning = true;
                         
                         dom.charDisplay.classList.remove('incorrect');
                         dom.charDisplay.classList.add('correct');
                         playSound('success');
 
                         setTimeout(() => {
-                            state.currentIndex++;
+                            state.practiceRound.currentIndex++;
                             displayNextChar();
-                            state.isTransitioning = false;
+                            state.practiceRound.isTransitioning = false;
                         }, 300);
                     } else {
                         playSound('fail');
@@ -714,23 +738,23 @@
                 updateStats(targetChar.toLowerCase(), isCorrect);
                 
                 if (isCorrect) {
-                    state.correctCount++;
+                    state.practiceRound.correctOnFirstTry++;
                     dom.charDisplay.classList.add('correct');
                     playSound('success');
                     
-                    state.isTransitioning = true;
+                    state.practiceRound.isTransitioning = true;
                     setTimeout(() => {
-                        state.currentIndex++;
+                        state.practiceRound.currentIndex++;
                         displayNextChar();
-                        state.isTransitioning = false;
+                        state.practiceRound.isTransitioning = false;
                     }, 300);
                 } else {
-                    state.isAwaitingCorrection = true;
+                    state.practiceRound.isAwaitingCorrection = true;
                     dom.charDisplay.classList.add('incorrect');
                     playSound('fail');
                     
                     const baseChar = targetChar.toLowerCase();
-                    state.sessionErrors[baseChar] = (state.sessionErrors[baseChar] || 0) + 1;
+                    state.practiceRound.sessionErrors[baseChar] = (state.practiceRound.sessionErrors[baseChar] || 0) + 1;
                 }
             }
             
@@ -754,14 +778,14 @@
                 window.removeEventListener('keydown', handleKeyPress);
                 highlightKey(null);
                 const endTime = new Date();
-                const timeTaken = ((endTime - state.startTime) / 1000).toFixed(2);
-                const accuracy = state.practiceSet.length > 0 ? ((state.correctCount / state.practiceSet.length) * 100).toFixed(1) : 0;
+                const timeTaken = ((endTime - state.practiceRound.startTime) / 1000).toFixed(2);
+                const accuracy = state.practiceRound.totalCount > 0 ? ((state.practiceRound.correctOnFirstTry / state.practiceRound.totalCount) * 100).toFixed(1) : 0;
                 const userSettings = state.allUsersData[state.currentUser]?.settings;
                 dom.resultChars.textContent = userSettings ? userSettings.selectedChars.join(', ') : 'N/A';
                 dom.resultTime.textContent = timeTaken;
                 dom.resultAccuracy.textContent = accuracy;
                 dom.errorAnalysisList.innerHTML = '';
-                const sortedErrors = Object.entries(state.sessionErrors).sort((a, b) => b[1] - a[1]);
+                const sortedErrors = Object.entries(state.practiceRound.sessionErrors).sort((a, b) => b[1] - a[1]);
                 if (sortedErrors.length === 0) {
                     dom.errorAnalysisList.innerHTML = '<li>太棒了！本次沒有任何錯誤。</li>';
                 } else {
@@ -780,6 +804,7 @@
                 const isDarkMode = document.body.classList.contains('dark-mode');
                 const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color');
                 const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--chart-grid-color');
+                const probabilityColor = getComputedStyle(document.documentElement).getPropertyValue('--probability-color');
 
                 const canvas = document.getElementById(canvasId);
                 const ctx = canvas.getContext('2d');
@@ -789,26 +814,21 @@
                     chartInstance.destroy();
                 }
 
+                const { probabilities } = getCharProbabilities();
                 const stats = state.allUsersData[state.currentUser]?.stats || {};
                 const statsArray = Object.entries(stats)
                     .filter(([, data]) => data.presented > 0)
                     .map(([char, data]) => ({
                         char,
                         ...data,
-                        accuracy: data.presented > 0 ? (data.correct / data.presented) * 100 : 0
+                        accuracy: data.presented > 0 ? (data.correct / data.presented) * 100 : 0,
+                        probability: (probabilities[char] || 0) * 100
                     }));
                 
                 switch (state.currentSortOrder) {
-                    case 'count':
-                        statsArray.sort((a, b) => b.presented - a.presented);
-                        break;
-                    case 'accuracy':
-                        statsArray.sort((a, b) => a.accuracy - b.accuracy);
-                        break;
-                    case 'alpha':
-                    default:
-                        statsArray.sort((a, b) => a.char.localeCompare(b.char));
-                        break;
+                    case 'count': statsArray.sort((a, b) => b.presented - a.presented); break;
+                    case 'accuracy': statsArray.sort((a, b) => a.accuracy - b.accuracy); break;
+                    case 'alpha': default: statsArray.sort((a, b) => a.char.localeCompare(b.char)); break;
                 }
 
                 if (statsArray.length === 0) {
@@ -830,7 +850,6 @@
                                 data: statsArray.map(s => s.presented),
                                 backgroundColor: 'rgba(122, 92, 88, 0.6)',
                                 borderColor: 'rgba(122, 92, 88, 1)',
-                                borderWidth: 1,
                                 yAxisID: 'y',
                             },
                             {
@@ -838,14 +857,21 @@
                                 data: statsArray.map(s => s.accuracy.toFixed(1)),
                                 backgroundColor: 'rgba(46, 125, 50, 0.6)',
                                 borderColor: 'rgba(46, 125, 50, 1)',
-                                borderWidth: 1,
                                 yAxisID: 'y1',
+                            },
+                            {
+                                label: '出現機率 (%)',
+                                data: statsArray.map(s => s.probability.toFixed(2)),
+                                type: 'line',
+                                borderColor: probabilityColor,
+                                backgroundColor: probabilityColor,
+                                yAxisID: 'y1',
+                                tension: 0.4
                             }
                         ]
                     },
                     options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false,
                         interaction: { mode: 'index', intersect: false },
                         plugins: {
                             legend: { labels: { color: textColor } },
@@ -874,7 +900,7 @@
                             },
                             y1: {
                                 type: 'linear', display: true, position: 'right', max: 100, min: 0,
-                                title: { display: true, text: '正確率 (%)', color: textColor },
+                                title: { display: true, text: '百分比 (%)', color: textColor },
                                 ticks: { color: textColor, callback: value => value + '%' },
                                 grid: { drawOnChartArea: false }
                             }
@@ -890,25 +916,18 @@
                 const numberLayout = "1234567890-=";
                 const letterLayout = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
                 dom.letterSelection.innerHTML = '';
-
                 const createRow = (chars) => {
                     const rowDiv = document.createElement('div');
                     rowDiv.className = 'selection-row';
-                    if (numberLayout.includes(chars[0])) {
-                        rowDiv.classList.add('number-selection-row');
-                    }
+                    if (numberLayout.includes(chars[0])) rowDiv.classList.add('number-selection-row');
                     chars.split('').forEach(char => {
                         const wrapper = document.createElement('div');
                         wrapper.className = 'letter-checkbox';
-                        wrapper.innerHTML = `
-                            <input type="checkbox" id="char-select-${char}" value="${char}">
-                            <label for="char-select-${char}">${char.toUpperCase()}</label>
-                        `;
+                        wrapper.innerHTML = `<input type="checkbox" id="char-select-${char}" value="${char}"><label for="char-select-${char}">${char.toUpperCase()}</label>`;
                         rowDiv.appendChild(wrapper);
                     });
                     dom.letterSelection.appendChild(rowDiv);
                 };
-                
                 createRow(numberLayout);
                 letterLayout.forEach(rowStr => createRow(rowStr));
             }
@@ -917,7 +936,6 @@
                 const numberLayout = "1234567890-=";
                 const letterLayout = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
                 dom.keyboard.innerHTML = '';
-                
                 const createRow = (chars) => {
                     const rowDiv = document.createElement('div');
                     rowDiv.className = 'keyboard-row';
@@ -930,7 +948,6 @@
                     });
                     dom.keyboard.appendChild(rowDiv);
                 };
-                
                 if (includeNumbers) createRow(numberLayout);
                 letterLayout.forEach(rowStr => createRow(rowStr));
             }
@@ -1000,6 +1017,10 @@
                         const sortType = e.target.dataset.sort;
                         const targetCanvasId = e.target.dataset.target;
                         state.currentSortOrder = sortType;
+                        if (state.currentUser && state.allUsersData[state.currentUser]) {
+                            state.allUsersData[state.currentUser].settings.sortOrder = sortType;
+                            saveAllUsersData();
+                        }
                         updateSortButtonsState(e.target.closest('.page'));
                         displayStatsChart(targetCanvasId);
                     }
@@ -1019,9 +1040,8 @@
                     state.allUsersData[newUsername] = {
                         settings: {
                             selectedChars: ['a', 's', 'd', 'f', 'j', 'k', 'l'],
-                            mixedCase: false,
-                            includeNumbers: false,
-                            charCount: 50
+                            mixedCase: false, includeNumbers: false,
+                            charCount: 50, sortOrder: 'alpha'
                         },
                         stats: {}
                     };
@@ -1043,7 +1063,6 @@
                 dom.selectAllBtn.addEventListener('click', () => {
                     dom.letterSelection.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
                 });
-
                 dom.deselectAllBtn.addEventListener('click', () => {
                     dom.letterSelection.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
                 });
@@ -1051,7 +1070,6 @@
                 dom.includeNumbersCheck.addEventListener('change', (e) => {
                     dom.letterSelectionWrapper.classList.toggle('numbers-enabled', e.target.checked);
                     if (!e.target.checked) {
-                        // Uncheck all number/symbol keys if the option is disabled
                         dom.letterSelection.querySelectorAll('.number-selection-row input').forEach(cb => cb.checked = false);
                     }
                 });
