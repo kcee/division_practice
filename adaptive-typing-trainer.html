@@ -7,7 +7,7 @@
     <!-- 引入 Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* --- 基本設定與字體 ------ */
+        /* --- 基本設定與字體 --- */
         :root {
             --bg-color: #F5EFE6;
             --text-color: #3C2A21;
@@ -118,6 +118,16 @@
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+
+        .shake {
+            animation: shake 0.2s linear;
         }
 
         /* --- 通用元件 --- */
@@ -440,7 +450,9 @@
                 sessionErrors: {},
                 settingsChartInstance: null,
                 resultsChartInstance: null,
-                currentSortOrder: 'alpha' // 預設排序方式
+                currentSortOrder: 'alpha',
+                isAwaitingCorrection: false, // [新增] 是否等待訂正
+                isTransitioning: false, // [新增] 是否在切換中
             };
 
             const STORAGE_KEY = 'typingAppAllUsers_v3';
@@ -532,17 +544,14 @@
                 const settings = state.allUsersData[state.currentUser]?.settings;
                 if (!settings) return;
 
-                // Load letter selections
                 dom.letterSelection.querySelectorAll('input[type="checkbox"]').forEach(cb => {
                     cb.checked = settings.selectedChars.includes(cb.value);
                 });
 
-                // Load other settings
                 dom.mixedCaseCheck.checked = settings.mixedCase;
                 dom.includeNumbersCheck.checked = settings.includeNumbers;
                 dom.charCountInp.value = settings.charCount;
                 
-                // Update UI based on includeNumbers setting
                 dom.letterSelectionWrapper.classList.toggle('numbers-enabled', settings.includeNumbers);
             }
 
@@ -627,6 +636,8 @@
                 state.correctCount = 0;
                 state.startTime = new Date();
                 state.sessionErrors = {};
+                state.isAwaitingCorrection = false;
+                state.isTransitioning = false;
 
                 showPage('practice-page');
                 displayNextChar();
@@ -638,6 +649,8 @@
                     showResults();
                     return;
                 }
+                
+                state.isAwaitingCorrection = false; // 為新字元重置訂正狀態
                 const char = state.practiceSet[state.currentIndex];
                 dom.charDisplay.textContent = char;
                 dom.charDisplay.className = '';
@@ -652,29 +665,64 @@
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
                 if (e.key.length > 1) return;
                 e.preventDefault();
-                window.removeEventListener('keydown', handleKeyPress); 
+                
+                if (state.isTransitioning) return; // 如果正在切換，忽略輸入
+
                 const typedChar = e.key;
                 const targetChar = state.practiceSet[state.currentIndex];
+
+                // 處理訂正中的輸入
+                if (state.isAwaitingCorrection) {
+                    if (typedChar === targetChar) {
+                        // 訂正成功
+                        state.isAwaitingCorrection = false;
+                        state.isTransitioning = true;
+                        
+                        dom.charDisplay.classList.remove('incorrect');
+                        dom.charDisplay.classList.add('correct'); // 給予正面回饋
+                        playSound('success');
+
+                        setTimeout(() => {
+                            state.currentIndex++;
+                            displayNextChar();
+                            state.isTransitioning = false;
+                        }, 300);
+                    } else {
+                        // 訂正失敗
+                        playSound('fail');
+                        dom.charDisplay.classList.remove('shake');
+                        void dom.charDisplay.offsetWidth; // 觸發 CSS 重繪
+                        dom.charDisplay.classList.add('shake');
+                    }
+                    return; // 結束本次處理
+                }
+
+                // 處理第一次輸入
                 const isCorrect = typedChar === targetChar;
+                
+                // 只有第一次輸入才計入統計
                 updateStats(targetChar.toLowerCase(), isCorrect);
+                
                 if (isCorrect) {
+                    state.correctCount++;
                     dom.charDisplay.classList.add('correct');
                     playSound('success');
-                    state.correctCount++;
+                    
+                    state.isTransitioning = true;
+                    setTimeout(() => {
+                        state.currentIndex++;
+                        displayNextChar();
+                        state.isTransitioning = false;
+                    }, 300);
                 } else {
+                    // 第一次就輸入錯誤
+                    state.isAwaitingCorrection = true;
                     dom.charDisplay.classList.add('incorrect');
                     playSound('fail');
+                    
                     const baseChar = targetChar.toLowerCase();
                     state.sessionErrors[baseChar] = (state.sessionErrors[baseChar] || 0) + 1;
                 }
-                const delay = isCorrect ? 300 : 1000;
-                setTimeout(() => {
-                    state.currentIndex++;
-                    displayNextChar();
-                    if (state.currentIndex < state.practiceSet.length) {
-                       window.addEventListener('keydown', handleKeyPress);
-                    }
-                }, delay);
             }
             
             function updateStats(char, isCorrect) {
@@ -830,7 +878,7 @@
             }
 
             function createSelectionKeyboard() {
-                const numberLayout = "1234567890-="; // [修正]
+                const numberLayout = "1234567890-=";
                 const letterLayout = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
                 dom.letterSelection.innerHTML = '';
 
@@ -857,7 +905,7 @@
             }
             
             function createPracticeKeyboard(includeNumbers) {
-                const numberLayout = "1234567890-="; // [修正]
+                const numberLayout = "1234567890-=";
                 const letterLayout = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
                 dom.keyboard.innerHTML = '';
                 
