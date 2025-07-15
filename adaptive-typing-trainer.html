@@ -99,6 +99,17 @@
         .theme-switcher input { display: none; }
         .theme-switcher .icon { font-size: 1.2rem; }
 
+        #version-display {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            font-size: 0.75rem;
+            color: var(--text-color);
+            opacity: 0.5;
+            z-index: 100;
+            pointer-events: none; /* 讓滑鼠可以穿透 */
+        }
+
         /* --- 頁面容器 --- */
         .page {
             width: 100%;
@@ -395,6 +406,8 @@
         </fieldset>
         <button id="back-to-home-btn">回到設定</button>
     </div>
+    
+    <div id="version-display"></div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -437,6 +450,7 @@
                 backToHomeBtn: document.getElementById('back-to-home-btn'),
                 themeToggle: document.getElementById('theme-toggle'),
                 themeIcon: document.querySelector('.theme-switcher .icon'),
+                versionDisplay: document.getElementById('version-display'),
             };
 
             // --- 應用程式狀態 ---
@@ -451,10 +465,11 @@
                 settingsChartInstance: null,
                 resultsChartInstance: null,
                 currentSortOrder: 'alpha',
-                isAwaitingCorrection: false, // [新增] 是否等待訂正
-                isTransitioning: false, // [新增] 是否在切換中
+                isAwaitingCorrection: false,
+                isTransitioning: false,
             };
 
+            const APP_VERSION = 'v2025.07.15.1';
             const STORAGE_KEY = 'typingAppAllUsers_v3';
             let audioCtx;
             try {
@@ -650,7 +665,7 @@
                     return;
                 }
                 
-                state.isAwaitingCorrection = false; // 為新字元重置訂正狀態
+                state.isAwaitingCorrection = false;
                 const char = state.practiceSet[state.currentIndex];
                 dom.charDisplay.textContent = char;
                 dom.charDisplay.className = '';
@@ -666,20 +681,18 @@
                 if (e.key.length > 1) return;
                 e.preventDefault();
                 
-                if (state.isTransitioning) return; // 如果正在切換，忽略輸入
+                if (state.isTransitioning) return;
 
                 const typedChar = e.key;
                 const targetChar = state.practiceSet[state.currentIndex];
 
-                // 處理訂正中的輸入
                 if (state.isAwaitingCorrection) {
                     if (typedChar === targetChar) {
-                        // 訂正成功
                         state.isAwaitingCorrection = false;
                         state.isTransitioning = true;
                         
                         dom.charDisplay.classList.remove('incorrect');
-                        dom.charDisplay.classList.add('correct'); // 給予正面回饋
+                        dom.charDisplay.classList.add('correct');
                         playSound('success');
 
                         setTimeout(() => {
@@ -688,19 +701,16 @@
                             state.isTransitioning = false;
                         }, 300);
                     } else {
-                        // 訂正失敗
                         playSound('fail');
                         dom.charDisplay.classList.remove('shake');
-                        void dom.charDisplay.offsetWidth; // 觸發 CSS 重繪
+                        void dom.charDisplay.offsetWidth;
                         dom.charDisplay.classList.add('shake');
                     }
-                    return; // 結束本次處理
+                    return;
                 }
 
-                // 處理第一次輸入
                 const isCorrect = typedChar === targetChar;
                 
-                // 只有第一次輸入才計入統計
                 updateStats(targetChar.toLowerCase(), isCorrect);
                 
                 if (isCorrect) {
@@ -715,7 +725,6 @@
                         state.isTransitioning = false;
                     }, 300);
                 } else {
-                    // 第一次就輸入錯誤
                     state.isAwaitingCorrection = true;
                     dom.charDisplay.classList.add('incorrect');
                     playSound('fail');
@@ -979,6 +988,7 @@
             }
 
             function init() {
+                dom.versionDisplay.textContent = APP_VERSION;
                 createSelectionKeyboard();
                 
                 loadAllUsersData();
