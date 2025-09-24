@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手機數獨破解器</title>
     <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
-    <script src="https://raw.githubusercontent.com/Eric-Canas/Homography.js/master/Homography.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/Eric-Canas/Homography.js@1.4/Homography.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
         #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
@@ -83,6 +83,15 @@
         let isDragging = false;
 
         console.log('程式啟動：初始化相機和事件監聽器');
+
+        // 檢查 Homography 庫載入
+        window.addEventListener('load', () => {
+            if (typeof Homography !== 'undefined') {
+                console.log('Homography 庫載入成功');
+            } else {
+                console.error('Homography 庫載入失敗，請檢查網路');
+            }
+        });
 
         // 初始化相機
         navigator.mediaDevices.getUserMedia({ 
@@ -196,7 +205,7 @@
         }
 
         // 確認標註：應用透視校正
-        document.getElementById('confirmAnnotation').addEventListener('click', () => {
+        document.getElementById('confirmAnnotation').addEventListener('click', async () => {
             console.log('開始確認標註');
             status.textContent = '正在校正透視...';
             try {
@@ -204,15 +213,30 @@
                     throw new Error('Homography 庫未載入，請檢查網路或重新載入頁面。');
                 }
                 
+                // 載入捕捉圖像為 Image
+                const inputImg = new Image();
+                inputImg.src = capturedImage;
+                await new Promise(resolve => { inputImg.onload = resolve; });
+                console.log('輸入圖像載入完成');
+                
+                // 源點（標註四角）
                 const srcPoints = controlPoints.map(p => [p.x, p.y]);
+                // 目標點（400x400 矩形）
                 const dstPoints = [[0, 0], [400, 0], [400, 400], [0, 400]];
                 console.log('源點：', srcPoints);
                 console.log('目標點：', dstPoints);
                 
                 // 使用 Homography 庫
-                const homography = new Homography('projective');
-                homography.setReferencePoints(srcPoints, dstPoints);
-                homography.transformCanvas(canvas, warpCanvas);
+                const myHomography = new Homography();
+                myHomography.setSourcePoints(srcPoints);
+                myHomography.setDestinyPoints(dstPoints);
+                myHomography.setImage(inputImg);
+                
+                const imgData = myHomography.warp();
+                console.log('Warp ImageData 尺寸：', imgData.width, 'x', imgData.height);
+                
+                // 繪製到 warpCanvas
+                warpCtx.putImageData(imgData, 0, 0);
                 
                 console.log('透視校正完成');
                 
@@ -265,7 +289,7 @@
             const grid = Array(9).fill().map(() => Array(9).fill(0));
             const cellWidth = 400 / 9;
             const cellHeight = 400 / 9;
-            const sourceCanvas = warpCanvas.style.display === 'none' ? canvas : warpCanvas; // Fallback
+            const sourceCanvas = warpCanvas.style.display === 'block' ? warpCanvas : canvas; // Fallback
 
             for (let row = 0; row < 9; row++) {
                 for (let col = 0; col < 9; col++) {
