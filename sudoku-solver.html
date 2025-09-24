@@ -5,32 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手機數獨破解器</title>
     <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/Eric-Canas/Homography.js@latest/Homography.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
         #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
         #capturedPhoto { width: 100%; max-width: 400px; border: 1px solid #ccc; margin: 10px 0; display: none; }
         #canvas { display: none; }
+        #annotationCanvas { position: absolute; top: 0; left: 0; cursor: crosshair; display: none; }
         .grid-container { margin: 20px auto; width: 360px; }
         #originalGrid, #solvedGrid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 1px; background: #000; width: 360px; height: 360px; margin: 10px auto; }
         .original-cell, .solved-cell { background: white; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; border: 1px solid #ccc; }
-        .original-cell { color: black; } /* 原題目數字為黑色 */
-        .solved-cell { color: green; } /* 解決數字為綠色 */
-        .thick { border: 3px solid #000 !important; } /* 粗線分區 */
+        .original-cell { color: black; }
+        .solved-cell { color: green; }
+        .thick { border: 3px solid #000 !important; }
         button { padding: 10px 20px; font-size: 16px; margin: 10px; }
         h3 { margin: 10px 0; }
+        #annotationContainer { position: relative; display: none; margin: 20px auto; width: 400px; height: 400px; }
+        .control-point { fill: red; stroke: yellow; stroke-width: 2px; cursor: pointer; }
     </style>
 </head>
 <body>
     <h1>手機數獨破解器</h1>
-    <p>使用後置相機拍攝數獨題目，點擊「捕捉畫面」來儲存並顯示照片，然後點擊「處理並破解」來辨識、顯示原題目並求解。</p>
+    <p>使用後置相機拍攝數獨題目，捕捉後拖拉四個紅點標註數獨區域，確認後自動校正並辨識。</p>
     
     <video id="video" autoplay playsinline muted></video><br>
     <button id="capture">捕捉畫面</button>
-    <button id="process" style="display:none;">處理並破解</button>
     
-    <img id="capturedPhoto" alt="捕捉的照片">
+    <div id="annotationContainer">
+        <img id="capturedPhoto" alt="捕捉的照片">
+        <svg id="annotationSvg" width="400" height="400" style="position: absolute; top: 0; left: 0; pointer-events: all;">
+            <!-- 四個控制點會動態生成 -->
+        </svg>
+        <button id="confirmAnnotation">確認標註</button>
+    </div>
     
     <canvas id="canvas" width="400" height="400"></canvas>
+    <canvas id="warpCanvas" width="400" height="400" style="display: none;"></canvas>
+    
+    <button id="process" style="display:none;">處理並破解</button>
     
     <h2>辨識結果</h2>
     <div class="grid-container">
@@ -50,14 +62,26 @@
         const video = document.getElementById('video');
         const capturedPhoto = document.getElementById('capturedPhoto');
         const canvas = document.getElementById('canvas');
+        const warpCanvas = document.getElementById('warpCanvas');
         const ctx = canvas.getContext('2d');
+        const warpCtx = warpCanvas.getContext('2d');
         const originalGridDiv = document.getElementById('originalGrid');
         const solvedGridDiv = document.getElementById('solvedGrid');
         const status = document.getElementById('status');
-        let stream = null; // 儲存媒體串流以便停止
+        const annotationContainer = document.getElementById('annotationContainer');
+        const annotationSvg = document.getElementById('annotationSvg');
+        let stream = null;
         let capturedImage = null;
+        let controlPoints = [
+            { x: 50, y: 50 },   // 左上
+            { x: 350, y: 50 },  // 右上
+            { x: 350, y: 350 }, // 右下
+            { x: 50, y: 350 }   // 左下
+        ];
+        let selectedPoint = -1;
+        let isDragging = false;
 
-        // 初始化相機（後置鏡頭）
+        // 初始化相機
         navigator.mediaDevices.getUserMedia({ 
             video: { facingMode: 'environment', width: 400, height: 400 } 
         }).then(s => {
@@ -67,46 +91,127 @@
             status.textContent = '無法存取相機：' + err.message;
         });
 
-        // 捕捉畫面到 canvas 並顯示照片，停止相機
+        // 捕捉畫面
         document.getElementById('capture').addEventListener('click', () => {
             ctx.drawImage(video, 0, 0, 400, 400);
             capturedImage = canvas.toDataURL('image/png');
             
-            // 顯示捕捉的照片
             capturedPhoto.src = capturedImage;
             capturedPhoto.style.display = 'block';
-            
-            // 隱藏 video
+            annotationContainer.style.display = 'block';
             video.style.display = 'none';
             
-            // 停止相機串流
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
             }
             
-            document.getElementById('process').style.display = 'inline';
-            status.textContent = '畫面已捕捉並顯示，請點擊處理。';
+            // 初始化控制點
+            controlPoints = [
+                { x: 50, y: 50 },
+                { x: 350, y: 50 },
+                { x: 350, y: 350 },
+                { x: 50, y: 350 }
+            ];
+            drawControlPoints();
+            status.textContent = '請拖拉紅點標註數獨四角，然後點擊確認。';
         });
 
-        // 處理：OCR 辨識 + 顯示原題目 + 求解
+        // 拖拉控制點（支援觸控和滑鼠）
+        function setupDragging() {
+            const events = ['mousedown', 'touchstart'];
+            events.forEach(event => annotationSvg.addEventListener(event, onMouseDown));
+            const moveEvents = ['mousemove', 'touchmove'];
+            moveEvents.forEach(event => document.addEventListener(event, onMouseMove));
+            const upEvents = ['mouseup', 'touchend'];
+            upEvents.forEach(event => document.addEventListener(event, onMouseUp));
+        }
+
+        function onMouseDown(e) {
+            e.preventDefault();
+            const rect = annotationSvg.getBoundingClientRect();
+            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+            
+            selectedPoint = controlPoints.findIndex(p => Math.hypot(p.x - x, p.y - y) < 20);
+            isDragging = selectedPoint !== -1;
+        }
+
+        function onMouseMove(e) {
+            if (!isDragging) return;
+            e.preventDefault();
+            const rect = annotationSvg.getBoundingClientRect();
+            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+            const x = Math.max(0, Math.min(400, clientX - rect.left));
+            const y = Math.max(0, Math.min(400, clientY - rect.top));
+            
+            controlPoints[selectedPoint] = { x, y };
+            drawControlPoints();
+        }
+
+        function onMouseUp(e) {
+            isDragging = false;
+            selectedPoint = -1;
+        }
+
+        // 繪製控制點和四邊形
+        function drawControlPoints() {
+            annotationSvg.innerHTML = '';
+            // 繪製四邊形線條
+            const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            polyline.setAttribute('points', controlPoints.map(p => `${p.x},${p.y}`).join(' '));
+            polyline.setAttribute('fill', 'none');
+            polyline.setAttribute('stroke', 'blue');
+            polyline.setAttribute('stroke-width', '2');
+            annotationSvg.appendChild(polyline);
+            
+            // 繪製四個控制點
+            controlPoints.forEach((point, i) => {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', point.x);
+                circle.setAttribute('cy', point.y);
+                circle.setAttribute('r', 10);
+                circle.classList.add('control-point');
+                annotationSvg.appendChild(circle);
+            });
+        }
+
+        // 確認標註：應用透視校正
+        document.getElementById('confirmAnnotation').addEventListener('click', () => {
+            status.textContent = '正在校正透視...';
+            const srcPoints = [
+                [controlPoints[0].x, controlPoints[0].y],
+                [controlPoints[1].x, controlPoints[1].y],
+                [controlPoints[2].x, controlPoints[2].y],
+                [controlPoints[3].x, controlPoints[3].y]
+            ];
+            const dstPoints = [[0, 0], [400, 0], [400, 400], [0, 400]];
+            
+            // 使用 Homography 計算變換
+            const homography = Homography.fromPoints(srcPoints, dstPoints);
+            homography.transformCanvas(canvas, warpCanvas);
+            
+            // 隱藏標註介面，顯示處理按鈕
+            annotationContainer.style.display = 'none';
+            document.getElementById('process').style.display = 'inline';
+            status.textContent = '透視校正完成，請點擊處理並破解。';
+        });
+
+        // 處理：OCR + 顯示原題目 + 求解
         document.getElementById('process').addEventListener('click', async () => {
-            if (!capturedImage) {
-                status.textContent = '請先捕捉畫面。';
-                return;
-            }
             status.textContent = '正在辨識數字...';
-            const sudokuGrid = await extractGrid(); // 提取 9x9 格子數字
+            const sudokuGrid = await extractGridFromWarp(); // 使用校正後的 canvas
             if (!sudokuGrid) {
                 status.textContent = '辨識失敗，請重新拍攝。';
                 return;
             }
 
-            // 顯示原題目格子
             displayOriginalGrid(sudokuGrid);
             status.textContent = '原題目已顯示，正在破解數獨...';
 
-            // 複製格子以避免修改原版
             const gridCopy = sudokuGrid.map(row => [...row]);
             const solved = solveSudoku(gridCopy);
             if (solved) {
@@ -117,22 +222,20 @@
             }
         });
 
-        // 提取格子：分割 canvas 成 9x9，使用 Tesseract OCR
-        async function extractGrid() {
+        // 從校正後 canvas 提取格子
+        async function extractGridFromWarp() {
             const grid = Array(9).fill().map(() => Array(9).fill(0));
             const cellWidth = 400 / 9;
             const cellHeight = 400 / 9;
 
             for (let row = 0; row < 9; row++) {
                 for (let col = 0; col < 9; col++) {
-                    // 擷取單一格子
                     const tempCanvas = document.createElement('canvas');
                     const tempCtx = tempCanvas.getContext('2d');
                     tempCanvas.width = cellWidth;
                     tempCanvas.height = cellHeight;
-                    tempCtx.drawImage(canvas, col * cellWidth, row * cellHeight, cellWidth, cellHeight, 0, 0, cellWidth, cellHeight);
+                    tempCtx.drawImage(warpCanvas, col * cellWidth, row * cellHeight, cellWidth, cellHeight, 0, 0, cellWidth, cellHeight);
 
-                    // OCR 辨識（訓練數字 0-9）
                     try {
                         const { data: { text } } = await Tesseract.recognize(tempCanvas, 'eng', {
                             tessedit_char_whitelist: '0123456789',
@@ -145,7 +248,7 @@
                     }
                 }
             }
-            console.log('辨識格子：', grid); // 除錯用
+            console.log('辨識格子：', grid);
             return grid;
         }
 
@@ -157,7 +260,7 @@
                     const cell = document.createElement('div');
                     cell.className = 'original-cell';
                     if (((row % 3 === 0) && (col % 3 === 0)) || ((row % 3 === 2) && (col % 3 === 2))) {
-                        cell.classList.add('thick'); // 粗線分區
+                        cell.classList.add('thick');
                     }
                     cell.textContent = grid[row][col] || '';
                     originalGridDiv.appendChild(cell);
@@ -173,7 +276,7 @@
                     const cell = document.createElement('div');
                     cell.className = 'solved-cell';
                     if (((row % 3 === 0) && (col % 3 === 0)) || ((row % 3 === 2) && (col % 3 === 2))) {
-                        cell.classList.add('thick'); // 粗線分區
+                        cell.classList.add('thick');
                     }
                     cell.textContent = grid[row][col] || '';
                     solvedGridDiv.appendChild(cell);
@@ -184,17 +287,15 @@
         // 數獨求解器：回溯法
         function solveSudoku(grid) {
             const empty = findEmpty(grid);
-            if (!empty) return true; // 已解決
+            if (!empty) return true;
 
             const [row, col] = empty;
 
             for (let num = 1; num <= 9; num++) {
                 if (isValid(grid, row, col, num)) {
                     grid[row][col] = num;
-
                     if (solveSudoku(grid)) return true;
-
-                    grid[row][col] = 0; // 回溯
+                    grid[row][col] = 0;
                 }
             }
             return false;
@@ -210,11 +311,9 @@
         }
 
         function isValid(grid, row, col, num) {
-            // 檢查列、行、3x3 子格
             for (let x = 0; x < 9; x++) {
                 if (grid[row][x] === num || grid[x][col] === num) return false;
             }
-
             const startRow = row - row % 3;
             const startCol = col - col % 3;
             for (let i = 0; i < 3; i++) {
@@ -224,6 +323,9 @@
             }
             return true;
         }
+
+        // 初始化拖拉
+        setupDragging();
     </script>
 </body>
 </html>
