@@ -8,20 +8,22 @@
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
         #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
+        #capturedPhoto { width: 100%; max-width: 400px; border: 1px solid #ccc; margin: 10px 0; display: none; }
         #canvas { display: none; }
         #grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 1px; background: #000; width: 360px; height: 360px; margin: 20px auto; }
         .cell { background: white; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; }
-        .thick { border: 3px solid #000; } /* 粗線分區 */
         button { padding: 10px 20px; font-size: 16px; margin: 10px; }
     </style>
 </head>
 <body>
     <h1>手機數獨破解器</h1>
-    <p>使用後置相機拍攝數獨題目，點擊「處理並破解」來辨識並求解。</p>
+    <p>使用後置相機拍攝數獨題目，點擊「捕捉畫面」來儲存並顯示照片，然後點擊「處理並破解」來辨識並求解。</p>
     
     <video id="video" autoplay playsinline muted></video><br>
     <button id="capture">捕捉畫面</button>
     <button id="process" style="display:none;">處理並破解</button>
+    
+    <img id="capturedPhoto" alt="捕捉的照片">
     
     <canvas id="canvas" width="400" height="400"></canvas>
     
@@ -31,31 +33,52 @@
 
     <script>
         const video = document.getElementById('video');
+        const capturedPhoto = document.getElementById('capturedPhoto');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const gridDiv = document.getElementById('grid');
         const status = document.getElementById('status');
+        let stream = null; // 儲存媒體串流以便停止
         let capturedImage = null;
 
         // 初始化相機（後置鏡頭）
         navigator.mediaDevices.getUserMedia({ 
             video: { facingMode: 'environment', width: 400, height: 400 } 
-        }).then(stream => {
+        }).then(s => {
+            stream = s;
             video.srcObject = stream;
         }).catch(err => {
             status.textContent = '無法存取相機：' + err.message;
         });
 
-        // 捕捉畫面到 canvas
+        // 捕捉畫面到 canvas 並顯示照片，停止相機
         document.getElementById('capture').addEventListener('click', () => {
             ctx.drawImage(video, 0, 0, 400, 400);
             capturedImage = canvas.toDataURL('image/png');
+            
+            // 顯示捕捉的照片
+            capturedPhoto.src = capturedImage;
+            capturedPhoto.style.display = 'block';
+            
+            // 隱藏 video
+            video.style.display = 'none';
+            
+            // 停止相機串流
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
             document.getElementById('process').style.display = 'inline';
-            status.textContent = '畫面已捕捉，請點擊處理。';
+            status.textContent = '畫面已捕捉並顯示，請點擊處理。';
         });
 
         // 處理：OCR 辨識 + 求解
         document.getElementById('process').addEventListener('click', async () => {
+            if (!capturedImage) {
+                status.textContent = '請先捕捉畫面。';
+                return;
+            }
             status.textContent = '正在辨識數字...';
             const sudokuGrid = await extractGrid(); // 提取 9x9 格子數字
             if (!sudokuGrid) return;
@@ -66,7 +89,7 @@
                 displayGrid(solved);
                 status.textContent = '破解完成！';
             } else {
-                status.textContent = '無解或辨識錯誤，請重新拍攝。';
+                status.textContent = '無解或辨識錯誤，請重新載入頁面重新拍攝。';
             }
         });
 
@@ -98,6 +121,7 @@
                     }
                 }
             }
+            console.log('辨識格子：', grid); // 除錯用
             return grid;
         }
 
@@ -152,9 +176,6 @@
                 for (let col = 0; col < 9; col++) {
                     const cell = document.createElement('div');
                     cell.className = 'cell';
-                    if ((row % 3 === 0 && col % 3 === 0) || (row % 3 === 2 && col % 3 === 2)) {
-                        cell.classList.add('thick'); // 粗線（但 CSS 需調整）
-                    }
                     cell.textContent = grid[row][col] || '';
                     gridDiv.appendChild(cell);
                 }
