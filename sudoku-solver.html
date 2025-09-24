@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手機數獨破解器</title>
     <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/Eric-Canas/Homography.js@latest/Homography.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/homography@1.0.1/homography.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
         #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
@@ -180,24 +180,33 @@
         }
 
         // 確認標註：應用透視校正
-        document.getElementById('confirmAnnotation').addEventListener('click', () => {
+        document.getElementById('confirmAnnotation').addEventListener('click', async () => {
             status.textContent = '正在校正透視...';
-            const srcPoints = [
-                [controlPoints[0].x, controlPoints[0].y],
-                [controlPoints[1].x, controlPoints[1].y],
-                [controlPoints[2].x, controlPoints[2].y],
-                [controlPoints[3].x, controlPoints[3].y]
-            ];
-            const dstPoints = [[0, 0], [400, 0], [400, 400], [0, 400]];
-            
-            // 使用 Homography 計算變換
-            const homography = Homography.fromPoints(srcPoints, dstPoints);
-            homography.transformCanvas(canvas, warpCanvas);
-            
-            // 隱藏標註介面，顯示處理按鈕
-            annotationContainer.style.display = 'none';
-            document.getElementById('process').style.display = 'inline';
-            status.textContent = '透視校正完成，請點擊處理並破解。';
+            try {
+                const srcPoints = controlPoints.map(p => [p.x, p.y]); // [[x,y], ...]
+                const dstPoints = [[0, 0], [400, 0], [400, 400], [0, 400]];
+                
+                // 創建 Image 物件以供 homography 使用
+                const img = new Image();
+                img.src = capturedImage;
+                await new Promise(resolve => { img.onload = resolve; });
+                
+                // 使用 Homography 庫
+                const homography = new Homography("projective");
+                homography.setReferencePoints(srcPoints, dstPoints, img);
+                const imgData = homography.warp();
+                
+                // 繪製到 warpCanvas
+                warpCtx.putImageData(imgData, 0, 0);
+                
+                // 隱藏標註介面，顯示處理按鈕
+                annotationContainer.style.display = 'none';
+                document.getElementById('process').style.display = 'inline';
+                status.textContent = '透視校正完成，請點擊處理並破解。';
+            } catch (err) {
+                console.error('透視校正錯誤：', err);
+                status.textContent = '校正失敗，請檢查控制點或重新拍攝。';
+            }
         });
 
         // 處理：OCR + 顯示原題目 + 求解
