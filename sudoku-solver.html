@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手機數獨破解器</title>
     <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/Eric-Canas/Homography.js@1.4/HomographyLightweight.min.js"></script>
+    <script src="https://raw.githubusercontent.com/Eric-Canas/Homography.js/master/Homography.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
         #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
         #capturedPhoto { width: 100%; max-width: 400px; border: 1px solid #ccc; margin: 10px 0; display: none; }
         #canvas { display: none; }
-        #annotationCanvas { position: absolute; top: 0; left: 0; cursor: crosshair; display: none; }
+        #warpCanvas { width: 100%; max-width: 400px; border: 2px solid blue; margin: 10px auto; display: none; }
         .grid-container { margin: 20px auto; width: 360px; }
         #originalGrid, #solvedGrid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 1px; background: #000; width: 360px; height: 360px; margin: 10px auto; }
         .original-cell, .solved-cell { background: white; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; border: 1px solid #ccc; }
@@ -26,10 +26,11 @@
 </head>
 <body>
     <h1>手機數獨破解器</h1>
-    <p>使用後置相機拍攝數獨題目，捕捉後拖拉四個紅點標註數獨區域，確認後自動校正並辨識。</p>
+    <p>使用後置相機拍攝數獨題目，捕捉後拖拉四個紅點標註數獨區域，確認後自動校正並顯示結果，然後辨識。</p>
     
     <video id="video" autoplay playsinline muted></video><br>
     <button id="capture">捕捉畫面</button>
+    <button id="reload" onclick="location.reload();">重新載入</button>
     
     <div id="annotationContainer">
         <img id="capturedPhoto" alt="捕捉的照片">
@@ -40,7 +41,7 @@
     </div>
     
     <canvas id="canvas" width="400" height="400"></canvas>
-    <canvas id="warpCanvas" width="400" height="400" style="display: none;"></canvas>
+    <canvas id="warpCanvas" width="400" height="400"></canvas>
     
     <button id="process" style="display:none;">處理並破解</button>
     
@@ -81,18 +82,23 @@
         let selectedPoint = -1;
         let isDragging = false;
 
+        console.log('程式啟動：初始化相機和事件監聽器');
+
         // 初始化相機
         navigator.mediaDevices.getUserMedia({ 
             video: { facingMode: 'environment', width: 400, height: 400 } 
         }).then(s => {
             stream = s;
             video.srcObject = stream;
+            console.log('相機初始化完成');
         }).catch(err => {
             status.textContent = '無法存取相機：' + err.message;
+            console.error('相機錯誤：', err);
         });
 
         // 捕捉畫面
         document.getElementById('capture').addEventListener('click', () => {
+            console.log('開始捕捉畫面');
             ctx.drawImage(video, 0, 0, 400, 400);
             capturedImage = canvas.toDataURL('image/png');
             
@@ -104,6 +110,7 @@
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
+                console.log('相機串流已停止');
             }
             
             // 初始化控制點
@@ -115,6 +122,7 @@
             ];
             drawControlPoints();
             status.textContent = '請拖拉紅點標註數獨四角，然後點擊確認。';
+            console.log('畫面捕捉完成，顯示標註介面');
         });
 
         // 拖拉控制點（支援觸控和滑鼠）
@@ -125,6 +133,7 @@
             moveEvents.forEach(event => document.addEventListener(event, onMouseMove));
             const upEvents = ['mouseup', 'touchend'];
             upEvents.forEach(event => document.addEventListener(event, onMouseUp));
+            console.log('拖拉事件監聽器已設定');
         }
 
         function onMouseDown(e) {
@@ -137,6 +146,9 @@
             
             selectedPoint = controlPoints.findIndex(p => Math.hypot(p.x - x, p.y - y) < 20);
             isDragging = selectedPoint !== -1;
+            if (isDragging) {
+                console.log(`開始拖拉點 ${selectedPoint}`);
+            }
         }
 
         function onMouseMove(e) {
@@ -150,9 +162,13 @@
             
             controlPoints[selectedPoint] = { x, y };
             drawControlPoints();
+            console.log(`點 ${selectedPoint} 更新位置：`, { x, y });
         }
 
         function onMouseUp(e) {
+            if (isDragging) {
+                console.log(`結束拖拉點 ${selectedPoint}`);
+            }
             isDragging = false;
             selectedPoint = -1;
         }
@@ -180,63 +196,66 @@
         }
 
         // 確認標註：應用透視校正
-        document.getElementById('confirmAnnotation').addEventListener('click', async () => {
+        document.getElementById('confirmAnnotation').addEventListener('click', () => {
+            console.log('開始確認標註');
             status.textContent = '正在校正透視...';
             try {
-                if (typeof homography === 'undefined') {
+                if (typeof Homography === 'undefined') {
                     throw new Error('Homography 庫未載入，請檢查網路或重新載入頁面。');
                 }
                 
-                // 載入捕捉圖像為 <img>
-                const inputImg = new Image();
-                inputImg.src = capturedImage;
-                await new Promise(resolve => { inputImg.onload = resolve; });
-                
-                // 源點（標註四角，像素座標）
                 const srcPoints = controlPoints.map(p => [p.x, p.y]);
-                // 目標點（400x400 矩形）
                 const dstPoints = [[0, 0], [400, 0], [400, 400], [0, 400]];
+                console.log('源點：', srcPoints);
+                console.log('目標點：', dstPoints);
                 
-                // 使用 Homography 庫（projective 模式）
-                const myHomography = new homography.Homography("projective");
-                myHomography.setReferencePoints(srcPoints, dstPoints);
-                myHomography.setImage(inputImg);
+                // 使用 Homography 庫
+                const homography = new Homography('projective');
+                homography.setReferencePoints(srcPoints, dstPoints);
+                homography.transformCanvas(canvas, warpCanvas);
                 
-                // Warp 並得到 warped <img>
-                const warpedImg = myHomography.warp();
-                await new Promise(resolve => { warpedImg.onload = resolve; });
+                console.log('透視校正完成');
                 
-                // 繪製到 warpCanvas
-                warpCtx.drawImage(warpedImg, 0, 0, 400, 400);
+                // 顯示校正結果
+                warpCanvas.style.display = 'block';
                 
                 // 隱藏標註介面，顯示處理按鈕
                 annotationContainer.style.display = 'none';
                 document.getElementById('process').style.display = 'inline';
-                status.textContent = '透視校正完成，請點擊處理並破解。';
+                status.textContent = '透視校正完成並顯示，請點擊處理並破解。';
             } catch (err) {
                 console.error('透視校正錯誤：', err);
                 status.textContent = '校正失敗，請檢查控制點或重新載入頁面：' + err.message;
+                // Fallback：使用原 canvas
+                warpCanvas.style.display = 'none';
+                document.getElementById('process').style.display = 'inline';
             }
         });
 
         // 處理：OCR + 顯示原題目 + 求解
         document.getElementById('process').addEventListener('click', async () => {
+            console.log('開始處理：OCR 辨識');
             status.textContent = '正在辨識數字...';
             const sudokuGrid = await extractGridFromWarp(); // 使用校正後的 canvas
             if (!sudokuGrid) {
+                console.log('辨識失敗');
                 status.textContent = '辨識失敗，請重新拍攝。';
                 return;
             }
 
+            console.log('OCR 完成，格子：', sudokuGrid);
             displayOriginalGrid(sudokuGrid);
             status.textContent = '原題目已顯示，正在破解數獨...';
+            console.log('開始破解數獨');
 
             const gridCopy = sudokuGrid.map(row => [...row]);
             const solved = solveSudoku(gridCopy);
             if (solved) {
+                console.log('破解完成');
                 displaySolvedGrid(gridCopy);
                 status.textContent = '破解完成！';
             } else {
+                console.log('破解失敗：無解');
                 status.textContent = '無解或辨識錯誤，請重新載入頁面重新拍攝。';
             }
         });
@@ -246,28 +265,31 @@
             const grid = Array(9).fill().map(() => Array(9).fill(0));
             const cellWidth = 400 / 9;
             const cellHeight = 400 / 9;
+            const sourceCanvas = warpCanvas.style.display === 'none' ? canvas : warpCanvas; // Fallback
 
             for (let row = 0; row < 9; row++) {
                 for (let col = 0; col < 9; col++) {
+                    console.log(`開始辨識格子 [${row}, ${col}]`);
                     const tempCanvas = document.createElement('canvas');
                     const tempCtx = tempCanvas.getContext('2d');
                     tempCanvas.width = cellWidth;
                     tempCanvas.height = cellHeight;
-                    tempCtx.drawImage(warpCanvas, col * cellWidth, row * cellHeight, cellWidth, cellHeight, 0, 0, cellWidth, cellHeight);
+                    tempCtx.drawImage(sourceCanvas, col * cellWidth, row * cellHeight, cellWidth, cellHeight, 0, 0, cellWidth, cellHeight);
 
                     try {
                         const { data: { text } } = await Tesseract.recognize(tempCanvas, 'eng', {
                             tessedit_char_whitelist: '0123456789',
                             tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
                         });
-                        grid[row][col] = parseInt(text.trim()) || 0;
+                        const num = parseInt(text.trim()) || 0;
+                        grid[row][col] = num;
+                        console.log(`格子 [${row}, ${col}] 辨識結果：${text} -> ${num}`);
                     } catch (err) {
-                        console.error('OCR 錯誤：', err);
+                        console.error(`OCR 錯誤 [${row}, ${col}]：`, err);
                         grid[row][col] = 0;
                     }
                 }
             }
-            console.log('辨識格子：', grid);
             return grid;
         }
 
@@ -306,9 +328,13 @@
         // 數獨求解器：回溯法
         function solveSudoku(grid) {
             const empty = findEmpty(grid);
-            if (!empty) return true;
+            if (!empty) {
+                console.log('數獨已解決');
+                return true;
+            }
 
             const [row, col] = empty;
+            console.log(`回溯：找到空位 [${row}, ${col}]`);
 
             for (let num = 1; num <= 9; num++) {
                 if (isValid(grid, row, col, num)) {
