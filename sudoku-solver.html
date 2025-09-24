@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手機數獨破解器</title>
+    <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
+        #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
+        #canvas { display: none; }
+        #grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 1px; background: #000; width: 360px; height: 360px; margin: 20px auto; }
+        .cell { background: white; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; }
+        .thick { border: 3px solid #000; } /* 粗線分區 */
+        button { padding: 10px 20px; font-size: 16px; margin: 10px; }
+    </style>
+</head>
+<body>
+    <h1>手機數獨破解器</h1>
+    <p>使用後置相機拍攝數獨題目，點擊「處理並破解」來辨識並求解。</p>
+    
+    <video id="video" autoplay playsinline muted></video><br>
+    <button id="capture">捕捉畫面</button>
+    <button id="process" style="display:none;">處理並破解</button>
+    
+    <canvas id="canvas" width="400" height="400"></canvas>
+    
+    <h2>破解結果</h2>
+    <div id="grid"></div>
+    <p id="status"></p>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const gridDiv = document.getElementById('grid');
+        const status = document.getElementById('status');
+        let capturedImage = null;
+
+        // 初始化相機（後置鏡頭）
+        navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment', width: 400, height: 400 } 
+        }).then(stream => {
+            video.srcObject = stream;
+        }).catch(err => {
+            status.textContent = '無法存取相機：' + err.message;
+        });
+
+        // 捕捉畫面到 canvas
+        document.getElementById('capture').addEventListener('click', () => {
+            ctx.drawImage(video, 0, 0, 400, 400);
+            capturedImage = canvas.toDataURL('image/png');
+            document.getElementById('process').style.display = 'inline';
+            status.textContent = '畫面已捕捉，請點擊處理。';
+        });
+
+        // 處理：OCR 辨識 + 求解
+        document.getElementById('process').addEventListener('click', async () => {
+            status.textContent = '正在辨識數字...';
+            const sudokuGrid = await extractGrid(); // 提取 9x9 格子數字
+            if (!sudokuGrid) return;
+
+            status.textContent = '正在破解數獨...';
+            const solved = solveSudoku(sudokuGrid);
+            if (solved) {
+                displayGrid(solved);
+                status.textContent = '破解完成！';
+            } else {
+                status.textContent = '無解或辨識錯誤，請重新拍攝。';
+            }
+        });
+
+        // 提取格子：分割 canvas 成 9x9，使用 Tesseract OCR
+        async function extractGrid() {
+            const grid = Array(9).fill().map(() => Array(9).fill(0));
+            const cellWidth = 400 / 9;
+            const cellHeight = 400 / 9;
+
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    // 擷取單一格子
+                    const tempCanvas = document.createElement('canvas');
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCanvas.width = cellWidth;
+                    tempCanvas.height = cellHeight;
+                    tempCtx.drawImage(canvas, col * cellWidth, row * cellHeight, cellWidth, cellHeight, 0, 0, cellWidth, cellHeight);
+
+                    // OCR 辨識（訓練數字 0-9）
+                    try {
+                        const { data: { text } } = await Tesseract.recognize(tempCanvas, 'eng', {
+                            tessedit_char_whitelist: '0123456789',
+                            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
+                        });
+                        grid[row][col] = parseInt(text.trim()) || 0;
+                    } catch (err) {
+                        console.error('OCR 錯誤：', err);
+                        grid[row][col] = 0;
+                    }
+                }
+            }
+            return grid;
+        }
+
+        // 數獨求解器：回溯法
+        function solveSudoku(grid) {
+            const empty = findEmpty(grid);
+            if (!empty) return true; // 已解決
+
+            const [row, col] = empty;
+
+            for (let num = 1; num <= 9; num++) {
+                if (isValid(grid, row, col, num)) {
+                    grid[row][col] = num;
+
+                    if (solveSudoku(grid)) return true;
+
+                    grid[row][col] = 0; // 回溯
+                }
+            }
+            return false;
+        }
+
+        function findEmpty(grid) {
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    if (grid[row][col] === 0) return [row, col];
+                }
+            }
+            return null;
+        }
+
+        function isValid(grid, row, col, num) {
+            // 檢查列、行、3x3 子格
+            for (let x = 0; x < 9; x++) {
+                if (grid[row][x] === num || grid[x][col] === num) return false;
+            }
+
+            const startRow = row - row % 3;
+            const startCol = col - col % 3;
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    if (grid[i + startRow][j + startCol] === num) return false;
+                }
+            }
+            return true;
+        }
+
+        // 顯示格子（解決後）
+        function displayGrid(grid) {
+            gridDiv.innerHTML = '';
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    if ((row % 3 === 0 && col % 3 === 0) || (row % 3 === 2 && col % 3 === 2)) {
+                        cell.classList.add('thick'); // 粗線（但 CSS 需調整）
+                    }
+                    cell.textContent = grid[row][col] || '';
+                    gridDiv.appendChild(cell);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
