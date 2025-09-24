@@ -10,14 +10,19 @@
         #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
         #capturedPhoto { width: 100%; max-width: 400px; border: 1px solid #ccc; margin: 10px 0; display: none; }
         #canvas { display: none; }
-        #grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 1px; background: #000; width: 360px; height: 360px; margin: 20px auto; }
-        .cell { background: white; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; }
+        .grid-container { margin: 20px auto; width: 360px; }
+        #originalGrid, #solvedGrid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 1px; background: #000; width: 360px; height: 360px; margin: 10px auto; }
+        .original-cell, .solved-cell { background: white; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; border: 1px solid #ccc; }
+        .original-cell { color: black; } /* 原題目數字為黑色 */
+        .solved-cell { color: green; } /* 解決數字為綠色 */
+        .thick { border: 3px solid #000 !important; } /* 粗線分區 */
         button { padding: 10px 20px; font-size: 16px; margin: 10px; }
+        h3 { margin: 10px 0; }
     </style>
 </head>
 <body>
     <h1>手機數獨破解器</h1>
-    <p>使用後置相機拍攝數獨題目，點擊「捕捉畫面」來儲存並顯示照片，然後點擊「處理並破解」來辨識並求解。</p>
+    <p>使用後置相機拍攝數獨題目，點擊「捕捉畫面」來儲存並顯示照片，然後點擊「處理並破解」來辨識、顯示原題目並求解。</p>
     
     <video id="video" autoplay playsinline muted></video><br>
     <button id="capture">捕捉畫面</button>
@@ -27,8 +32,18 @@
     
     <canvas id="canvas" width="400" height="400"></canvas>
     
+    <h2>辨識結果</h2>
+    <div class="grid-container">
+        <h3>原題目</h3>
+        <div id="originalGrid"></div>
+    </div>
+    
     <h2>破解結果</h2>
-    <div id="grid"></div>
+    <div class="grid-container">
+        <h3>解決後</h3>
+        <div id="solvedGrid"></div>
+    </div>
+    
     <p id="status"></p>
 
     <script>
@@ -36,7 +51,8 @@
         const capturedPhoto = document.getElementById('capturedPhoto');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
-        const gridDiv = document.getElementById('grid');
+        const originalGridDiv = document.getElementById('originalGrid');
+        const solvedGridDiv = document.getElementById('solvedGrid');
         const status = document.getElementById('status');
         let stream = null; // 儲存媒體串流以便停止
         let capturedImage = null;
@@ -73,7 +89,7 @@
             status.textContent = '畫面已捕捉並顯示，請點擊處理。';
         });
 
-        // 處理：OCR 辨識 + 求解
+        // 處理：OCR 辨識 + 顯示原題目 + 求解
         document.getElementById('process').addEventListener('click', async () => {
             if (!capturedImage) {
                 status.textContent = '請先捕捉畫面。';
@@ -81,12 +97,20 @@
             }
             status.textContent = '正在辨識數字...';
             const sudokuGrid = await extractGrid(); // 提取 9x9 格子數字
-            if (!sudokuGrid) return;
+            if (!sudokuGrid) {
+                status.textContent = '辨識失敗，請重新拍攝。';
+                return;
+            }
 
-            status.textContent = '正在破解數獨...';
-            const solved = solveSudoku(sudokuGrid);
+            // 顯示原題目格子
+            displayOriginalGrid(sudokuGrid);
+            status.textContent = '原題目已顯示，正在破解數獨...';
+
+            // 複製格子以避免修改原版
+            const gridCopy = sudokuGrid.map(row => [...row]);
+            const solved = solveSudoku(gridCopy);
             if (solved) {
-                displayGrid(solved);
+                displaySolvedGrid(gridCopy);
                 status.textContent = '破解完成！';
             } else {
                 status.textContent = '無解或辨識錯誤，請重新載入頁面重新拍攝。';
@@ -123,6 +147,38 @@
             }
             console.log('辨識格子：', grid); // 除錯用
             return grid;
+        }
+
+        // 顯示原題目格子
+        function displayOriginalGrid(grid) {
+            originalGridDiv.innerHTML = '';
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'original-cell';
+                    if (((row % 3 === 0) && (col % 3 === 0)) || ((row % 3 === 2) && (col % 3 === 2))) {
+                        cell.classList.add('thick'); // 粗線分區
+                    }
+                    cell.textContent = grid[row][col] || '';
+                    originalGridDiv.appendChild(cell);
+                }
+            }
+        }
+
+        // 顯示解決格子
+        function displaySolvedGrid(grid) {
+            solvedGridDiv.innerHTML = '';
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'solved-cell';
+                    if (((row % 3 === 0) && (col % 3 === 0)) || ((row % 3 === 2) && (col % 3 === 2))) {
+                        cell.classList.add('thick'); // 粗線分區
+                    }
+                    cell.textContent = grid[row][col] || '';
+                    solvedGridDiv.appendChild(cell);
+                }
+            }
         }
 
         // 數獨求解器：回溯法
@@ -167,19 +223,6 @@
                 }
             }
             return true;
-        }
-
-        // 顯示格子（解決後）
-        function displayGrid(grid) {
-            gridDiv.innerHTML = '';
-            for (let row = 0; row < 9; row++) {
-                for (let col = 0; col < 9; col++) {
-                    const cell = document.createElement('div');
-                    cell.className = 'cell';
-                    cell.textContent = grid[row][col] || '';
-                    gridDiv.appendChild(cell);
-                }
-            }
         }
     </script>
 </body>
