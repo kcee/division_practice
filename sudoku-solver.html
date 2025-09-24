@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手機數獨破解器</title>
     <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/homography@1.0.1/homography.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/Eric-Canas/Homography.js@1.4/HomographyLightweight.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
         #video { width: 100%; max-width: 400px; border: 1px solid #ccc; }
@@ -183,21 +183,31 @@
         document.getElementById('confirmAnnotation').addEventListener('click', async () => {
             status.textContent = '正在校正透視...';
             try {
-                const srcPoints = controlPoints.map(p => [p.x, p.y]); // [[x,y], ...]
+                if (typeof homography === 'undefined') {
+                    throw new Error('Homography 庫未載入，請檢查網路或重新載入頁面。');
+                }
+                
+                // 載入捕捉圖像為 <img>
+                const inputImg = new Image();
+                inputImg.src = capturedImage;
+                await new Promise(resolve => { inputImg.onload = resolve; });
+                
+                // 源點（標註四角，像素座標）
+                const srcPoints = controlPoints.map(p => [p.x, p.y]);
+                // 目標點（400x400 矩形）
                 const dstPoints = [[0, 0], [400, 0], [400, 400], [0, 400]];
                 
-                // 創建 Image 物件以供 homography 使用
-                const img = new Image();
-                img.src = capturedImage;
-                await new Promise(resolve => { img.onload = resolve; });
+                // 使用 Homography 庫（projective 模式）
+                const myHomography = new homography.Homography("projective");
+                myHomography.setReferencePoints(srcPoints, dstPoints);
+                myHomography.setImage(inputImg);
                 
-                // 使用 Homography 庫
-                const homography = new Homography("projective");
-                homography.setReferencePoints(srcPoints, dstPoints, img);
-                const imgData = homography.warp();
+                // Warp 並得到 warped <img>
+                const warpedImg = myHomography.warp();
+                await new Promise(resolve => { warpedImg.onload = resolve; });
                 
                 // 繪製到 warpCanvas
-                warpCtx.putImageData(imgData, 0, 0);
+                warpCtx.drawImage(warpedImg, 0, 0, 400, 400);
                 
                 // 隱藏標註介面，顯示處理按鈕
                 annotationContainer.style.display = 'none';
@@ -205,7 +215,7 @@
                 status.textContent = '透視校正完成，請點擊處理並破解。';
             } catch (err) {
                 console.error('透視校正錯誤：', err);
-                status.textContent = '校正失敗，請檢查控制點或重新拍攝。';
+                status.textContent = '校正失敗，請檢查控制點或重新載入頁面：' + err.message;
             }
         });
 
